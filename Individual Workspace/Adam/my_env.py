@@ -197,6 +197,7 @@ def render_policy(env, policy):
 
 def render_policy_image(env, policy):
     """Render the policy as a graphical image using matplotlib."""
+    from matplotlib.patches import Rectangle
     
     size = env.size
     fig, ax = plt.subplots(figsize=(size, size))
@@ -213,9 +214,9 @@ def render_policy_image(env, policy):
     for s in range(env.nS):
         row, col = divmod(s, size)
         if s in env.holes:
-            ax.add_patch(plt.Rectangle((col, size-1-row), 1, 1, color='black'))
+            ax.add_patch(Rectangle((col, size-1-row), 1, 1, color='black'))
         elif s in env.goal:
-            ax.add_patch(plt.Rectangle((col, size-1-row), 1, 1, color='gold'))
+            ax.add_patch(Rectangle((col, size-1-row), 1, 1, color='gold'))
     
     # Draw arrows for policy
     arrow_dict = {
@@ -248,7 +249,7 @@ def render_policy_image(env, policy):
     
     import os
     plt.title('Optimal Policy')
-    plt.tight_layout(rect=[0, 0, 1, 1])
+    plt.tight_layout(rect=(0, 0, 1, 1))
     out_path = os.path.join(os.getcwd(), 'policy_visualization.png')
     plt.savefig(out_path)
     plt.close(fig)
