@@ -1,0 +1,7 @@
+# Python caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Ignore best_score.csv in any logs/ folder
+**/logs/best_score.csv

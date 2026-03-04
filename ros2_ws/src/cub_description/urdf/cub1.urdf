@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<robot name="nvp" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <material name="black">
+    <color rgba="0.01 0.01 0.01 1"/>
+  </material>
+
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+ 
+  <link name="cub1">
+    <visual>
+      <origin xyz="0.18 -0. -0.02" rpy="0 0 1.57"/>
+      <geometry>
+        <mesh filename="package://cub_description/meshes/cub_mesh.dae" scale="5 5 5" />
+      </geometry>
+    </visual>
+  </link>
+
+</robot>

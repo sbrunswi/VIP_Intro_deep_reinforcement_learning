@@ -1,0 +1,33 @@
+# config/course_full_facility.yaml
+frame_id: qualisys
+gate_margin_m: 2.5
+pylon_height_m: 7.0
+missed_gate_penalty_s: 3.0
+out_of_bounds_penalty_s: 5.0   # add +5s each time you leave bounds
+start_on_finish_cross: true
+centerline_closed: true
+
+# Pylons (meters, map frame)
+pylons:
+  - {x: 3.984, y:  -9.587, z: 0.0, r: 0.25, name: P1}
+  - {x: -9.1245, y: -0.0397, z: 0.0, r: 0.25, name: P2}
+  - {x: 4.055, y: 8.704, z: 0.0, r: 0.25, name: P3}
+  - {x:  19.872, y: -0.2360, z: 0.0, r: 0.25, name: P4}
+
+# Gates (each gate is the line segment between two pylons)
+# G1 (finish) is between P1 and P2 by convention.
+gates:
+  - {p1: 0, p2: 1, name: G1}  # finish
+  - {p1: 1, p2: 2, name: G2}
+  - {p1: 2, p2: 3, name: G3}
+  - {p1: 3, p2: 0, name: G4}
+
+
+# axis-aligned bounds rectangle (map/world frame, meters)
+bounds_rect:
+  min_x: 24.0
+  max_x:  -13.0
+  min_y: -15.0
+  max_y:  13.0
+bounds_line_z: 0.2
+bounds_line_width: 0.8
