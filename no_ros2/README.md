@@ -76,10 +76,24 @@ Optional: add the repo root and `ros2_ws/src/auav_pylon_2026` to `PYTHONPATH` (e
 - **Same interface:** 15D observation from `/sim/odom` (via `PylonRacingEnv`), 4D action (aileron, elevator, throttle, rudder) published to `/sim/auto_joy`. No ref_data or waypoints; the policy maps state → action.
 - **How to run:** Start the Gazebo (or other) sim so `/sim/odom` and `/sim/auto_joy` are available. **Do not** run the TECS node (`sim_tecs_ros_xtrack` or the ROS2 `test_pylon_gym.py`). From the repo root with the ROS2 workspace sourced, run for example:
   ```bash
-  source /path/to/ros2_ws/install/setup.bash   # or setup.zsh
-  python no_ros2/agents/example_agent.py --no-train --ros2 --viz    # Q-learning, greedy policy
+  source ros2_ws/install/setup.bash # or setup.zsh
+
+  # Option 1: Fast Training (Mock) -> Eval in ROS 2
+  # Trains 400 episodes instantly in the headless Python mock env, 
+  # then connects to ROS 2 to fly the final trained model.
+  python3 no_ros2/agents/example_agent.py --ros2
+
+  # Option 2: Slow Training (ROS 2) -> Eval in ROS 2
+  # connects to ROS 2 immediately. You will watch all 400 training 
+  # episodes happen live in the physics engine (useful for debugging).
+  python3 no_ros2/agents/example_agent.py --train-in-ros2
+
+  # Option 3: No Training -> Eval in ROS 2 (with 3D Viz)
+  # Skips training entirely and just evaluates a greedy policy in the sim.
+  python3 no_ros2/agents/example_agent.py --no-train --ros2 --viz
   ```
   The script calls `rclpy.init()` when `--ros2` is set, creates `make_pylon_env(use_ros2=True)` (same 15D obs), and publishes actions to `/sim/auto_joy`; it calls `rclpy.shutdown()` on exit.
+
 - **Caveats:** Policies are trained on the **mock** env (simplified dynamics). The real sim (and hardware) differ, so performance may drop without fine-tuning or training on the sim. Observation filtering in `PylonRacingEnv` may differ slightly from the TECS node’s `actual_data`; the 15D layout is the same.
 
 ---

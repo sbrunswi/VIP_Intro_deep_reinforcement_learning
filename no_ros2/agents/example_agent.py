@@ -14,7 +14,7 @@ How it works:
 - Actions: 11 discrete (aileron, elevator, throttle, rudder) — mostly level flight with
   turns; elevator -0.075 at throttle 0.65 holds altitude in the mock.
 
-Run: python no_ros2/agents/example_agent.py [--viz] [--train N] [--no-train] [--ros2]
+Run: python no_ros2/agents/example_agent.py [--viz] [--train N] [--no-train] [--ros2] [--train-in-ros2]
 """
 import sys
 import os
@@ -33,7 +33,6 @@ from no_ros2.environments.pylon_course import DEFAULT_PYLONS, BOUNDS_RECT, PYLON
 
 
 # --- Bounds (used for state bins and out-of-bounds penalty) ---
-# STATE_BOUNDS kept for reference; only BOUNDS_RECT is used in the simplified state/reward.
 STATE_BOUNDS = {
     "x": (BOUNDS_RECT["min_x"], BOUNDS_RECT["max_x"]),
     "y": (BOUNDS_RECT["min_y"], BOUNDS_RECT["max_y"]),
@@ -41,8 +40,8 @@ STATE_BOUNDS = {
     "vx": (-15.0, 15.0),
     "vy": (-15.0, 15.0),
     "vz": (-10.0, 10.0),
-    "roll": (-np.deg2rad(30), np.deg2rad(30)),   # phi_lim_deg = 30 (sim.yaml)
-    "pitch": (-np.deg2rad(20), np.deg2rad(20)),  # TECS pitch clip ±20°
+    "roll": (-np.deg2rad(30), np.deg2rad(30)),   
+    "pitch": (-np.deg2rad(20), np.deg2rad(20)),  
     "yaw": (-np.pi, np.pi),
     "v": (0.0, 15.0),
     "gamma": (-np.pi / 2, np.pi / 2),
@@ -55,18 +54,8 @@ STATE_BOUNDS = {
 # --- Discretization (state = rx, ry, heading_band, target_pylon_idx) ---
 N_X_BINS = 5
 N_Y_BINS = 5
-# Unused in current state; kept in case state is expanded later.
-N_ALT_BANDS = 3
-N_HEADING_BANDS = 4
-N_ROLL_BANDS = 3
-N_PITCH_BANDS = 3
-N_SPEED_BANDS = 3
-N_GAMMA_BANDS = 3
-N_R_BANDS = 3
+TARGET_ALT_M = PYLON_MID_HEIGHT_M  
 
-TARGET_ALT_M = PYLON_MID_HEIGHT_M  # reward band and low-alt penalty
-# Discrete actions (aileron, elevator, throttle, rudder). Mock: vz_cmd = elevator*4 + (throttle-0.5)*2.
-# Level: elevator -0.075 at throttle 0.65 holds altitude; climb (3,9,10) for recovery.
 DISCRETE_ACTIONS = [
     (0.0, -0.075, 0.65, 0.0),   # 0: straight, level (hold altitude)
     (0.0, -0.075, 0.65, 0.25),  # 1: turn right, level
@@ -82,13 +71,11 @@ DISCRETE_ACTIONS = [
 ]
 N_ACTIONS = len(DISCRETE_ACTIONS)
 
-# Lap order: P1(0) -> P2(1) -> P3(2) -> P4(3) -> P1(0). target_idx advances on pass.
 PYLON_ORDER = [0, 1, 2, 3]
-PASS_THRESHOLD_M = 6.0  # pass = within this distance (m) of current target pylon center
+PASS_THRESHOLD_M = 6.0  
 
 
 def _bin(value, low, high, n_bins):
-    """Map value to bin index in [0, n_bins-1] for discretizing state."""
     clipped = np.clip(value, low, high)
     if high <= low:
         return 0
@@ -98,13 +85,6 @@ def _bin(value, low, high, n_bins):
 
 
 def obs_to_state(obs, target_pylon_idx):
-    """
-    Discretize observation into state tuple (rx, ry, heading_band, target_pylon_idx).
-    - rx, ry: x and y binned into N_X_BINS / N_Y_BINS over BOUNDS_RECT.
-    - heading_band: 0=right of target, 1=left, 2=pointing at target (dot>0.7), 3=pointing away (dot<-0.5).
-    - target_pylon_idx: which pylon we are currently trying to reach (0..3).
-    State space size is 5*5*4*4 = 400 so Q-learning can learn with limited data.
-    """
     x, y = obs[0], obs[1]
     if len(obs) >= 15:
         vx, vy = obs[6], obs[7]
@@ -136,12 +116,6 @@ def obs_to_state(obs, target_pylon_idx):
 
 
 def get_reward_shaping(obs, target_pylon_idx, prev_dist):
-    """
-    Shaping reward and pass flag. We ignore the env’s +1 per step; only this + crash penalty is used.
-    - Pass: within PASS_THRESHOLD_M of current target -> +30, passed=True (caller advances target_idx).
-    - Not passed: +0.4 if closer than prev_dist, -0.25 if farther; +0.3*align (velocity toward target).
-    - Out of BOUNDS_RECT: -0.5. Altitude: +0.1 in band, -0.2 if z<1.
-    """
     x, y, z = obs[0], obs[1], obs[2]
     if len(obs) >= 15:
         vx, vy = obs[6], obs[7]
@@ -166,12 +140,10 @@ def get_reward_shaping(obs, target_pylon_idx, prev_dist):
         align = (dx * vx + dy * vy) / speed_xy
         base += 0.3 * align
 
-    # Out of course bounds -> penalize so agent doesn’t run away
     g = BOUNDS_RECT
     if x < g["min_x"] or x > g["max_x"] or y < g["min_y"] or y > g["max_y"]:
         base -= 0.5
 
-    # Altitude: small bonus in band, penalty if very low
     if z < 1.0:
         base -= 0.2
     elif abs(z - TARGET_ALT_M) < 1.0:
@@ -181,8 +153,6 @@ def get_reward_shaping(obs, target_pylon_idx, prev_dist):
 
 
 class QLearningAgent:
-    """Tabular Q-learning: epsilon-greedy exploration, Q(s,a) updated with TD target. Tie-break among max Q by random choice."""
-
     def __init__(self, alpha=0.1, gamma=0.95, epsilon=0.2, epsilon_min=0.05, epsilon_decay=0.995):
         self.alpha = alpha
         self.gamma = gamma
@@ -197,10 +167,9 @@ class QLearningAgent:
         q = self.Q[state]
         max_q = np.max(q)
         best = np.flatnonzero(q == max_q)
-        return int(np.random.choice(best))  # tie-break among actions with same Q
+        return int(np.random.choice(best))
 
     def update(self, state, action, reward, next_state, done):
-        """Q(s,a) += alpha * (target - Q(s,a)); target = reward + gamma*max_a Q(s',a) or reward if done."""
         if done:
             target = reward
         else:
@@ -212,29 +181,24 @@ class QLearningAgent:
 
 
 def run_episode(env, agent, train=True, max_steps=2000):
-    """
-    One episode: reset env, target_idx=0 (P1). Each step: state from obs+target_idx, action from agent,
-    step env. Reward = get_reward_shaping(...) - TIME_PENALTY; add env crash penalty if terminated.
-    On pass (within 6m of current target), increment pylons_passed and set target_idx to next pylon in PYLON_ORDER.
-    If training, update Q and decay epsilon.
-    """
     obs, _ = env.reset()
     target_idx = 0
     prev_dist = None
     total_reward = 0.0
     pylons_passed = 0
-    TIME_PENALTY = 0.02  # per-step penalty so agent prefers to complete laps, not just stay up
+    TIME_PENALTY = 0.02  
     for step in range(max_steps):
         state = obs_to_state(obs, target_idx)
         action_idx = agent.get_action(state, greedy=not train)
         action = np.array(DISCRETE_ACTIONS[action_idx], dtype=np.float32)
         obs, r_env, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
-        # Reward = shaping only (no env +1 per step); add crash penalty when episode ends badly
+        
         extra, passed = get_reward_shaping(obs, target_idx, prev_dist)
         reward = extra - TIME_PENALTY
         if terminated and r_env < 0:
             reward += r_env
+            
         if passed:
             pylons_passed += 1
             target_idx = (target_idx + 1) % len(PYLON_ORDER)
@@ -242,12 +206,14 @@ def run_episode(env, agent, train=True, max_steps=2000):
         else:
             target = DEFAULT_PYLONS[target_idx]
             prev_dist = np.sqrt((target[0] - obs[0])**2 + (target[1] - obs[1])**2)
+            
         next_state = obs_to_state(obs, target_idx)
         if train:
             agent.update(state, action_idx, reward, next_state, done)
         total_reward += reward
         if done:
             break
+            
     if train:
         agent.decay_epsilon()
     return total_reward, pylons_passed, step + 1
@@ -259,53 +225,90 @@ def main():
     parser.add_argument("--viz", action="store_true", help="Show 3D visualization")
     parser.add_argument("--train", type=int, default=400, metavar="N", help="Training episodes (default 400)")
     parser.add_argument("--no-train", action="store_true", help="Skip training, run with random policy (for testing)")
-    parser.add_argument("--eval-episodes", type=int, default=5, help="Evaluation episodes after training (with --viz)")
+    parser.add_argument("--eval-episodes", type=int, default=5, help="Evaluation episodes after training")
     parser.add_argument("--show-details", action="store_true", help="Show full state vector in viz (use with --viz)")
-    parser.add_argument("--ros2", action="store_true", help="Use ROS2 sim env (direct swap: subscribe /sim/odom, publish /sim/auto_joy). Requires sim running and rclpy.")
+    parser.add_argument("--ros2", action="store_true", help="Connect to ROS2 ONLY for the evaluation flight.")
+    parser.add_argument("--train-in-ros2", action="store_true", help="Connect to ROS2 for BOTH training and evaluation (Slow/Real-time).")
     args = parser.parse_args()
 
+    # If the user wants to train in ROS 2, they definitely want to evaluate in it too
+    if args.train_in_ros2:
+        args.ros2 = True
+
+    # 1. Initialize ROS 2 if either flag is active
     if args.ros2:
         import rclpy
+        print("Initializing ROS 2...")
         rclpy.init()
 
-    env = make_pylon_env(use_ros2=args.ros2)
     agent = QLearningAgent(alpha=0.15, gamma=0.98, epsilon=0.3, epsilon_min=0.05, epsilon_decay=0.997)
 
+    # ---------------------------------------------------------
+    # 2. TRAINING PHASE 
+    # ---------------------------------------------------------
     if not args.no_train:
-        print(f"Training for {args.train} episodes...")
+        print(f"\n--- Phase 1: Training ---")
+        if args.train_in_ros2:
+            print(f"Training for {args.train} episodes in ROS 2 environment (SLOW, Real-Time)...")
+            train_env = make_pylon_env(use_ros2=True)
+        else:
+            print(f"Training for {args.train} episodes in MOCK environment (FAST, Headless)...")
+            train_env = make_pylon_env(use_ros2=False)
+
         for ep in range(args.train):
-            r, passed, steps = run_episode(env, agent, train=True)
+            r, passed, steps = run_episode(train_env, agent, train=True)
             if (ep + 1) % 20 == 0 or ep == 0:
                 print(f"  Episode {ep + 1}: reward={r:.1f}, pylons_passed={passed}, steps={steps}, epsilon={agent.epsilon:.3f}")
-        print("Training done.\n")
+        
+        print("Training complete.\n")
+        train_env.close()
+
+    # ---------------------------------------------------------
+    # 3. EVALUATION PHASE
+    # ---------------------------------------------------------
+    print(f"--- Phase 2: Evaluation ---")
+    if args.ros2:
+        print("Connecting to ROS 2 for the final Evaluation Flight...")
+        eval_env = make_pylon_env(use_ros2=True)
+    else:
+        print("Using MOCK environment for the Evaluation Flight...")
+        eval_env = make_pylon_env(use_ros2=False)
 
     viz = None
     if args.viz:
         from no_ros2.viz_3d import PylonRacingViz3D
         viz = PylonRacingViz3D(show_state_vector=args.show_details)
 
-    n_show = args.eval_episodes if args.viz else 1
-    print(f"Running {n_show} episode(s) (greedy policy)" + (" with viz" if args.viz else "") + "...")
+    n_show = args.eval_episodes if (args.viz or args.ros2) else 1
+    print(f"Running {n_show} episode(s) with Greedy Policy...")
+    
     for ep in range(n_show):
-        obs, _ = env.reset()
+        obs, _ = eval_env.reset()
         target_idx = 0
         prev_dist = None
         total_reward = 0.0
         pylons_passed = 0
         step = 0
+        
         if viz:
             viz.clear_trail()
             viz.update(obs, reward=0.0, step_count=step, laps=0)
+            
         TIME_PENALTY = 0.02
         while step < 2000:
             state = obs_to_state(obs, target_idx)
+            
+            # Action locked to greedy (no random exploration) during evaluation
             action_idx = agent.get_action(state, greedy=True)
             action = np.array(DISCRETE_ACTIONS[action_idx], dtype=np.float32)
-            obs, r_env, terminated, truncated, _ = env.step(action)
+            
+            obs, r_env, terminated, truncated, _ = eval_env.step(action)
             extra, passed = get_reward_shaping(obs, target_idx, prev_dist)
             reward = extra - TIME_PENALTY
+            
             if terminated and r_env < 0:
                 reward += r_env
+                
             if passed:
                 pylons_passed += 1
                 target_idx = (target_idx + 1) % len(PYLON_ORDER)
@@ -313,28 +316,34 @@ def main():
             else:
                 target = DEFAULT_PYLONS[target_idx]
                 prev_dist = np.sqrt((target[0] - obs[0])**2 + (target[1] - obs[1])**2)
+                
             total_reward += reward
             step += 1
+            
             if viz:
                 viz.update(obs, reward=reward, step_count=step, laps=pylons_passed // 4)
+                
             if terminated or truncated:
                 break
+                
         print(f"  Eval episode {ep + 1}: reward={total_reward:.1f}, pylons_passed={pylons_passed}, steps={step}")
         if viz and ep < n_show - 1:
             viz.clear_trail()
 
+    # ---------------------------------------------------------
+    # 4. CLEANUP
+    # ---------------------------------------------------------
     if viz:
         try:
             input("Press Enter to close visualization...")
         except EOFError:
             pass
         viz.close()
-    env.close()
+        
+    eval_env.close()
 
     if args.ros2:
-        import rclpy
         rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
