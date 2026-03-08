@@ -1,0 +1,4 @@
+# no_ros2 stack: pylon racing env, agents, and viz (no ROS2)
+gymnasium>=0.29.0
+numpy>=1.20.0
+matplotlib>=3.5.0
