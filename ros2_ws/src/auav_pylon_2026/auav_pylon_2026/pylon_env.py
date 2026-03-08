@@ -5,12 +5,16 @@ import rclpy
 from sensor_msgs.msg import Joy
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
- 
+from tf_transformations import euler_from_quaternion
+
 class PylonRacingEnv(gym.Env):
     def __init__(self):
         super(PylonRacingEnv, self).__init__()
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32)
+        
+        # UPGRADED: 15 Dimensions 
+        # [x, y, z, roll, pitch, yaw, vx, vy, vz, v, gamma, vdot, p, q, r]
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
 
         self.node = rclpy.create_node('pylon_gym_node')
         
@@ -21,35 +25,71 @@ class PylonRacingEnv(gym.Env):
         self.current_odom = None
         self.has_taken_off = False 
         
-        # NEW: Velocity tracking variables
-        self.prev_pos = None
-        self.prev_time = None
-        self.current_vel = np.zeros(3)
+        # State tracking for finite differences and filters
+        self.prev_t = None
+        self.prev_state = None
+        self.filtered_state = np.zeros(15, dtype=np.float32)
+        self.last_filtered_state = np.zeros(15, dtype=np.float32)
+
+    @staticmethod
+    def _angdiff(a, b):
+        return (a - b + np.pi) % (2 * np.pi) - np.pi
 
     def _odom_cb(self, msg):
         self.current_odom = msg
         
-        # Manually calculate velocity using finite difference
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        p = msg.pose.pose.position
-        curr_pos = np.array([p.x, p.y, p.z])
+        if self.prev_t is None:
+            self.prev_t = t - 0.01
+            
+        dt = max(t - self.prev_t, 0.01)
+        self.prev_t = t
+
+        # Extract Raw Position & Orientation
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        z = msg.pose.pose.position.z
+        q = msg.pose.pose.orientation
+        roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+
+        if self.prev_state is None:
+            self.prev_state = np.array([x, y, z, roll, pitch, yaw, 0.0]) # Last 0.0 is speed
+
+        # Calculate Finite Differences
+        vx = (x - self.prev_state[0]) / dt
+        vy = (y - self.prev_state[1]) / dt
+        vz = (z - self.prev_state[2]) / dt
+        v = np.sqrt(vx**2 + vy**2 + vz**2)
+
+        p_rate = self._angdiff(roll, self.prev_state[3]) / dt
+        q_rate = self._angdiff(pitch, self.prev_state[4]) / dt
+        r_rate = self._angdiff(yaw, self.prev_state[5]) / dt
+
+        denom = max(v, 1e-5)
+        gamma = np.arcsin(np.clip(vz / denom, -1.0, 1.0))
+        vdot = (v - self.prev_state[6]) # Acceleration
+
+        # Assemble Raw 15D Vector
+        raw_state = np.array([
+            x, y, z, roll, pitch, yaw, 
+            vx, vy, vz, v, gamma, vdot, 
+            p_rate, q_rate, r_rate
+        ], dtype=np.float32)
+
+        # Low Pass Filter (10Hz)
+        fc = 10.0  
+        alpha = np.exp(-2 * np.pi * fc * dt)
         
-        if self.prev_pos is not None:
-            dt = t - self.prev_time
-            if dt > 0.0:
-                self.current_vel = (curr_pos - self.prev_pos) / dt
-        
-        self.prev_pos = curr_pos
-        self.prev_time = t
+        self.filtered_state = alpha * raw_state + (1.0 - alpha) * self.last_filtered_state
+        self.last_filtered_state = self.filtered_state.copy()
+
+        # Update previous state for next callback
+        self.prev_state = np.array([x, y, z, roll, pitch, yaw, v])
 
     def _get_obs(self):
         if self.current_odom is None: 
-            return np.zeros(6, dtype=np.float32)
-        p = self.current_odom.pose.pose.position
-        return np.array([
-            p.x, p.y, p.z, 
-            self.current_vel[0], self.current_vel[1], self.current_vel[2]
-        ], dtype=np.float32)
+            return np.zeros(15, dtype=np.float32)
+        return self.filtered_state.copy()
 
     def step(self, action):
         joy_msg = Joy()
@@ -65,6 +105,7 @@ class PylonRacingEnv(gym.Env):
         rclpy.spin_once(self.node, timeout_sec=0.1)
         obs = self._get_obs()
         
+        # obs[2] is Z (Altitude)
         if obs[2] > 1.0:
             self.has_taken_off = True
 
@@ -88,8 +129,9 @@ class PylonRacingEnv(gym.Env):
             rclpy.spin_once(self.node)
             
         self.has_taken_off = False 
-        self.prev_pos = None
-        self.prev_time = None
-        self.current_vel = np.zeros(3)
+        self.prev_t = None
+        self.prev_state = None
+        self.filtered_state = np.zeros(15, dtype=np.float32)
+        self.last_filtered_state = np.zeros(15, dtype=np.float32)
         
         return self._get_obs(), {}

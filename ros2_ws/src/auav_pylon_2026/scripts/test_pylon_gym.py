@@ -1,68 +1,159 @@
 #!/usr/bin/env python3
 import rclpy
 import numpy as np
+import casadi as ca
+
+# NEW IMPORTS: For RViz2 Path Visualization
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
+
 from auav_pylon_2026.pylon_env import PylonRacingEnv 
- 
+from auav_pylon_2026.tecs_controller_xtrack_sample import TECSControl_cub
+from auav_pylon_2026.cross_tracker_nav_sample import XTrack_NAV_lookAhead
+
+# Define the Race Track Waypoints
+ALT = 7.0
+CONTROL_POINT = [
+    (-10.0, -5.0, ALT),
+    (-30.0, -10.0, ALT),
+    (-30.0, -40.0, ALT),
+    (30.0, -30.0, ALT),
+    (30.0, 5.0, ALT),
+    (10.0, 5.0, ALT),
+    (-10.0, -5.0, ALT),
+]
+
 def main():
     rclpy.init()
     print("Connecting to Pylon Racing Simulation...")
     env = PylonRacingEnv()
+    
+    # ---------------------------------------------------------
+    # NEW: Setup RViz2 Path Publisher
+    # We use the node already created by the Gym wrapper
+    # ---------------------------------------------------------
+    path_pub = env.node.create_publisher(Path, '/sim/ref_path', 10)
+    
+    # Pre-build the static path message
+    ref_path_msg = Path()
+    ref_path_msg.header.frame_id = 'map' # Standard RViz frame
+    
+    for wp in CONTROL_POINT:
+        pose = PoseStamped()
+        pose.header.frame_id = 'map'
+        pose.pose.position.x = float(wp[0])
+        pose.pose.position.y = float(wp[1])
+        pose.pose.position.z = float(wp[2])
+        ref_path_msg.poses.append(pose)
+    # ---------------------------------------------------------
 
     print("Testing Reset...")
     obs, info = env.reset()
     
-    target_alt = 7.0
-    print(f"Initiating Takeoff & Hold at {target_alt}m (Press Ctrl+C to stop)...")
-
-    current_elevator = -0.02 
+    dt = 0.1  
+    time_elapsed = 0.0
+    tecs_control = TECSControl_cub(dt, "sim")
+    
+    current_WP_ind = 0
+    last_WP_ind = len(CONTROL_POINT)
+    wpt_planner = XTrack_NAV_lookAhead(dt, CONTROL_POINT, current_WP_ind)
+    
+    wpt_planner.path_distance_buf = 5.0  
+    
+    # ---------------------------------------------------------
+    # FIX: Increase switching distance to stop the jerking!
+    # ---------------------------------------------------------
+    wpt_planner.wpt_switching_distance = 15.0  
+    wpt_planner.v_cruise = 10.0  
+    
+    flight_mode = "takeoff"
+    end_cruise = False
+    
+    throttle = 0.7
+    elev = 0.0
+    aileron = 0.0
+    rudder = 0.0
+    
     step_count = 0
 
     try:
-        # Loop forever until Ctrl+C
         while rclpy.ok():
-            current_alt = obs[2]
-            vz = obs[5] # NEW: Extract vertical velocity for damping
-            current_speed = np.sqrt(obs[3]**2 + obs[4]**2 + obs[5]**2)
+            actual_data = {
+                "x_est": obs[0], "y_est": obs[1], "z_est": obs[2],
+                "roll_est": obs[3], "pitch_est": obs[4], "yaw_est": obs[5],
+                "vx_est": obs[6], "vy_est": obs[7], "vz_est": obs[8],
+                "v_est": obs[9], "gamma_est": obs[10], "vdot_est": obs[11],
+                "p_est": obs[12], "q_est": obs[13], "r_est": obs[14],
+            }
 
-            aileron = 0.0
-            rudder = 0.0
-            
-            # 1. Proportional Error Calculation
-            alt_error = target_alt - current_alt
-            
-            # 2. Flight Phase Logic
-            if current_speed < 4.0:
-                target_elevator = -0.02
-                throttle = 1.0
-            elif current_speed >= 4.0 and current_alt < 2.0:
-                target_elevator = 0.12
-                throttle = 1.0
+            time_elapsed += dt
+            step_idx = int(time_elapsed / dt)
+
+            if actual_data["z_est"] <= 1.0 and not end_cruise:
+                flight_mode = "takeoff"
             else:
-                # PD Controller (P = alt_error * 0.08, D = vz * 0.1)
-                # The D-term pushes the elevator the OPPOSITE way if it's climbing/falling too fast
-                target_elevator = np.clip((alt_error * 0.08) - (vz * 0.1), -0.25, 0.15)
+                flight_mode = "airborne"
+
+            if flight_mode == "takeoff":
+                throttle = float(ca.fmin(1.0, ca.fmax(0.7, throttle + 2.0 * dt)))
+                rudder = 0.0
+                aileron = 0.0
                 
-                # Smarter throttle management
-                if alt_error > 1.0:
-                    throttle = 0.8  
-                elif alt_error < -1.0:
-                    throttle = 0.1  # Cut power completely to stop the infinite climb
+                v_to = 0.5  
+                e_down = -0.02  
+                e_up = 0.15  
+                e_rate = 0.40  
+                elev = float(ca.if_else(actual_data["v_est"] < v_to, e_down, ca.fmin(e_up, elev + e_rate * dt)))
+
+            elif flight_mode == "airborne":
+                if current_WP_ind == last_WP_ind:
+                    current_WP_ind = 0
+                    end_cruise = False
+                    wpt_planner = XTrack_NAV_lookAhead(dt, CONTROL_POINT, current_WP_ind)
                 else:
-                    throttle = 0.45 # Lower cruise power for the Cub
+                    v_array = [actual_data["vx_est"], actual_data["vy_est"], actual_data["vz_est"]]
+                    
+                    des_v, des_gamma, des_heading, along_track_err, cross_track_err = wpt_planner.wp_tracker(
+                        CONTROL_POINT, actual_data["x_est"], actual_data["y_est"], actual_data["z_est"], v_array, verbose=False
+                    )
 
-            # 3. Smooth the actuator input
-            current_elevator += np.clip(target_elevator - current_elevator, -0.01, 0.01)
+                    des_a = 1.0 * (des_v - np.abs(actual_data["v_est"]))
+                    
+                    ref_data = {
+                        "des_v": des_v, 
+                        "des_gamma": des_gamma, 
+                        "des_heading": des_heading, 
+                        "des_a": des_a
+                    }
 
-            action = np.array([aileron, current_elevator, throttle, rudder], dtype=np.float32)
+                    aileron, elev, throttle, rudder = tecs_control.compute_control(
+                        step_idx, ref_data, actual_data
+                    )
+                    
+                    current_WP_ind = wpt_planner.check_arrived(along_track_err, v_array, verbose=False)
+
+            action = np.array([aileron, elev, throttle, rudder], dtype=np.float32)
             obs, reward, terminated, truncated, info = env.step(action)
             
+            # ---------------------------------------------------------
+            # NEW: Publish the RViz2 Path every 10 steps
+            # ---------------------------------------------------------
             if step_count % 10 == 0:
-                print(f"Step {step_count} | Speed: {current_speed:.2f} m/s | Alt: {current_alt:.2f} m | Elev: {current_elevator:.3f} | Thr: {throttle:.2f}")
+                # Update the timestamp so RViz knows it's current
+                ref_path_msg.header.stamp = env.node.get_clock().now().to_msg()
+                path_pub.publish(ref_path_msg)
+                
+                print(f"Step {step_count} | Mode: {flight_mode.upper()} | WP: {current_WP_ind}/{last_WP_ind} | Alt: {actual_data['z_est']:.2f}m | Spd: {actual_data['v_est']:.2f}m/s")
 
             if terminated:
-                print("Crashed! Resetting...")
+                print("Crash detected! Resetting simulation...")
                 obs, info = env.reset()
-                current_elevator = -0.02
+                
+                time_elapsed = 0.0
+                current_WP_ind = 0
+                wpt_planner = XTrack_NAV_lookAhead(dt, CONTROL_POINT, current_WP_ind)
+                throttle = 0.7
+                elev = 0.0
 
             step_count += 1
 
