@@ -19,14 +19,28 @@ def main():
     parser = argparse.ArgumentParser(description="Pylon gym PD altitude-hold test (mock env)")
     parser.add_argument("--viz", action="store_true", help="Show 3D visualization (pylons + UAV)")
     parser.add_argument("--show-details", action="store_true", help="Show full state vector in viz (use with --viz)")
+    course_group = parser.add_mutually_exclusive_group()
+    course_group.add_argument("--purt", action="store_true", help="Use PURT competition course (4 pylons)")
+    course_group.add_argument("--sample", action="store_true", help="Use sample course 1 (6 pylons, default)")
     args = parser.parse_args()
 
-    print("Using Mock Pylon Environment (no ROS2)...")
-    env = make_pylon_env(use_ros2=False)
+    course = "purt" if args.purt else "sample"
+    print(f"Using Mock Pylon Environment (no ROS2) — course: {course}")
+    env = make_pylon_env(use_ros2=False, course=course)
     viz = None
     if args.viz:
         from no_ros2.viz_3d import PylonRacingViz3D
-        viz = PylonRacingViz3D(show_state_vector=args.show_details)
+        from no_ros2.environments.pylon_course import get_course
+        c = get_course(course)
+        viz = PylonRacingViz3D(
+            pylons=c["pylons"],
+            gates=c["gates"],
+            pylon_names=c["pylon_names"],
+            bounds_rect=c["bounds_rect"],
+            pylon_height_m=c["pylon_height_m"],
+            pylon_radius_m=c["pylon_radius_m"],
+            show_state_vector=args.show_details,
+        )
 
     print("Testing Reset...")
     obs, info = env.reset()

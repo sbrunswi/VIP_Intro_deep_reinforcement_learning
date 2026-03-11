@@ -10,13 +10,14 @@ from no_ros2.environments.mock_pylon_env import MockPylonRacingEnv
 from no_ros2.environments.pylon_wrapper import PylonRacingWrapper
 
 
-def make_pylon_env(use_ros2=False, **kwargs):
+def make_pylon_env(use_ros2=False, course="sample", **kwargs):
     """Build base env and wrap with PylonRacingWrapper. Caller must rclpy.init() before
     and rclpy.shutdown() after when use_ros2=True.
+    Available courses: "purt", "sample"
     """
     if use_ros2:
         from auav_pylon_2026.pylon_env import PylonRacingEnv
         base = PylonRacingEnv(**kwargs)
     else:
-        base = MockPylonRacingEnv(**kwargs)
+        base = MockPylonRacingEnv(course=course, **kwargs)
     return PylonRacingWrapper(base)

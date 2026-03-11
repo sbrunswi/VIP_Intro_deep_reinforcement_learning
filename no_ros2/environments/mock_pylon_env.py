@@ -9,7 +9,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
-from no_ros2.environments.pylon_course import PYLON_HEIGHT_M
+from no_ros2.environments.pylon_course import get_course, DEFAULT_COURSE, PYLON_HEIGHT_M
 
 # Observation layout (15D, matches ROS2 PylonRacingEnv / TECS actual_data)
 # [0:3]   x, y, z (position, m)
@@ -21,20 +21,19 @@ from no_ros2.environments.pylon_course import PYLON_HEIGHT_M
 # [12:15] p, q, r = roll, pitch, yaw rate (rad/s)
 OBS_SIZE = 15
 
-# Altitude limits (m): ground clamp in _integrate; ceiling = half pylon height
-MAX_ALT_M = PYLON_HEIGHT_M * 0.5
-
 
 class MockPylonRacingEnv(gym.Env):
     """Drop-in replacement for PylonRacingEnv with no rclpy/ROS2. Same action space; 15D observation."""
 
-    def __init__(self, dt=0.1, seed=None):
+    def __init__(self, dt=0.1, seed=None, course=DEFAULT_COURSE):
+        self._course = get_course(course)
         super().__init__()
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(OBS_SIZE,), dtype=np.float32
         )
         self.dt = dt
+        self._max_alt_m = self._course["pylon_height_m"] * 0.5
         self._rng = np.random.default_rng(seed)
         # Core state: x, y, z, vx, vy, vz
         self._state = np.zeros(6, dtype=np.float32)
@@ -100,8 +99,8 @@ class MockPylonRacingEnv(gym.Env):
             self._state[2] = 0.0
             self._state[5] = min(0.0, self._state[5])
         # Ceiling clamp (race altitude limit)
-        if self._state[2] > MAX_ALT_M:
-            self._state[2] = MAX_ALT_M
+        if self._state[2] > self._max_alt_m:
+            self._state[2] = self._max_alt_m
             self._state[5] = min(0.0, self._state[5])
 
     def step(self, action):
