@@ -12,6 +12,7 @@ from no_ros2.environments.pylon_course import (
     PYLON_NAMES,
     FINISH_GATE_INDEX,
     BOUNDS_RECT,
+    get_course,
 )
 
 
@@ -93,6 +94,10 @@ class PylonRacingViz3D:
         self,
         pylons=None,
         gates=None,
+        pylon_names=None,
+        bounds_rect=None,
+        pylon_height_m=None,
+        pylon_radius_m=None,
         trail_len=60,
         target_alt_m=7.0,
         follow_camera=True,
@@ -107,6 +112,10 @@ class PylonRacingViz3D:
         self._plt = plt
         self.pylons = pylons if pylons is not None else DEFAULT_PYLONS.copy()
         self.gates = gates if gates is not None else list(DEFAULT_GATES)
+        self._pylon_names = pylon_names if pylon_names is not None else PYLON_NAMES
+        self._bounds_rect = bounds_rect if bounds_rect is not None else BOUNDS_RECT
+        self._pylon_height_m = pylon_height_m if pylon_height_m is not None else PYLON_HEIGHT_M
+        self._pylon_radius_m = pylon_radius_m if pylon_radius_m is not None else PYLON_RADIUS_M
         self.trail_len = trail_len
         self.target_alt_m = target_alt_m
         self.follow_camera = follow_camera
@@ -125,7 +134,7 @@ class PylonRacingViz3D:
         self._start_time = None  # set on first update; reset in clear_trail()
         self._last_laps = 0
 
-        self._fig = plt.figure(figsize=(6, 4.5), facecolor="#1a1a1a")
+        self._fig = plt.figure(figsize=(12, 9), facecolor="#1a1a1a")
         self._ax = self._fig.add_subplot(111, projection="3d", facecolor="#1a1a1a")
         self._fig.canvas.manager.set_window_title("Pylon Racing (no ROS2)")
 
@@ -142,18 +151,18 @@ class PylonRacingViz3D:
         self._ax.zaxis.label.set_color("#aaa")
         self._ax.grid(False)
 
-        g = BOUNDS_RECT
+        g = self._bounds_rect
         # Bounds rectangle at z=0
         bx = [g["min_x"], g["max_x"], g["max_x"], g["min_x"], g["min_x"]]
         by = [g["min_y"], g["min_y"], g["max_y"], g["max_y"], g["min_y"]]
         self._ax.plot(bx, by, [0] * 5, color="#555", linestyle="-", linewidth=1.5, zorder=1)
 
         # Pylon cylinders and labels (bright for dark bg)
-        z_mid = np.mean([self.pylons[:, 2].min(), self.pylons[:, 2].max()]) + PYLON_HEIGHT_M * 0.5
+        z_mid = np.mean([self.pylons[:, 2].min(), self.pylons[:, 2].max()]) + self._pylon_height_m * 0.5
         for i in range(len(self.pylons)):
             px, py, z0 = self.pylons[i, 0], self.pylons[i, 1], self.pylons[i, 2]
-            z1 = z0 + PYLON_HEIGHT_M
-            xc, yc, zb, zt = _cylinder_mesh(px, py, z0, z1, PYLON_RADIUS_M)
+            z1 = z0 + self._pylon_height_m
+            xc, yc, zb, zt = _cylinder_mesh(px, py, z0, z1, self._pylon_radius_m)
             self._ax.plot(xc, yc, zb, color="#ffa726", linewidth=2, zorder=5)
             self._ax.plot(xc, yc, zt, color="#ffa726", linewidth=2, zorder=5)
             for j in range(len(xc)):
@@ -161,8 +170,8 @@ class PylonRacingViz3D:
                     [xc[j], xc[j]], [yc[j], yc[j]], [zb[j], zt[j]],
                     color="#ffa726", linewidth=1.5, alpha=0.9, zorder=5
                 )
-            name = PYLON_NAMES[i] if i < len(PYLON_NAMES) else f"P{i+1}"
-            self._ax.text(px, py, z1 + 0.5, name, fontsize=8, color="#ffd54f", zorder=6)
+            name = self._pylon_names[i] if i < len(self._pylon_names) else f"P{i+1}"
+            self._ax.text(px, py, z1 + 0.5, name, fontsize=14, color="#ffd54f", zorder=6)
 
         # Gate lines: finish gate bright green, others muted
         for gi, (i, j) in enumerate(self.gates):
@@ -187,7 +196,7 @@ class PylonRacingViz3D:
         xs, ys = self.pylons[:, 0], self.pylons[:, 1]
         self._ax.set_xlim(xs.min() - margin, xs.max() + margin)
         self._ax.set_ylim(ys.min() - margin, ys.max() + margin)
-        self._ax.set_zlim(0, PYLON_HEIGHT_M + 5)
+        self._ax.set_zlim(0, self._pylon_height_m + 5)
         if show_state_vector:
             self._ax.set_xlabel("X (m)")
             self._ax.set_ylabel("Y (m)")
@@ -209,12 +218,12 @@ class PylonRacingViz3D:
             self._ax.zaxis.pane.set_edgecolor("none")
 
         # HUD text (updated in update) — light on dark
-        self._hud_text = self._fig.text(0.02, 0.02, "", fontsize=8, family="monospace",
+        self._hud_text = self._fig.text(0.02, 0.02, "", fontsize=13, family="monospace",
                                        color="#ddd", verticalalignment="bottom", wrap=False)
         # State vector panel (right side), only when show_state_vector=True
         self._state_text = None
         if show_state_vector:
-            self._state_text = self._fig.text(0.98, 0.98, "", fontsize=7, family="monospace",
+            self._state_text = self._fig.text(0.98, 0.98, "", fontsize=12, family="monospace",
                                              color="#bbb", verticalalignment="top", horizontalalignment="right", wrap=False)
 
         self._plt.ion()
@@ -289,7 +298,7 @@ class PylonRacingViz3D:
             self._ax.set_xlim(x - m, x + m)
             self._ax.set_ylim(y - m, y + m)
             z_min = max(0, z - 5)
-            z_max = max(PYLON_HEIGHT_M + 5, z + 10)
+            z_max = max(self._pylon_height_m + 5, z + 10)
             self._ax.set_zlim(z_min, z_max)
             # Azimuth: camera behind UAV = opposite to horizontal velocity
             if speed > 0.3:
