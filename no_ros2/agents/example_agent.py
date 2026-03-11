@@ -12,7 +12,8 @@ How it works:
   alignment bonus for pointing at target; -0.5 outside course bounds; small altitude terms.
   We do not use the env’s +1 per step; only shaping + crash penalty.
 - Actions: 11 discrete (aileron, elevator, throttle, rudder) — mostly level flight with
-  turns; elevator -0.075 at throttle 0.65 holds altitude in the mock.
+  turns; elevator=0.0 at throttle=0.5 holds altitude at 7 m/s (Sport Cub S2 cruise).
+  Positive elevator = climb in both mock and ROS2.
 
 Run: python no_ros2/agents/example_agent.py [--viz] [--train N] [--no-train] [--ros2] [--train-in-ros2]
 """
@@ -36,18 +37,24 @@ N_X_BINS = 5
 N_Y_BINS = 5
 TARGET_ALT_M = PYLON_MID_HEIGHT_M
 
+# Action: (aileron, elevator, throttle, rudder).
+# Elevator sign convention (matches both mock and ROS2 after pylon_env.py fix):
+#   positive elevator  → nose up → climb
+#   negative elevator  → nose down → descend
+# Throttle=0.5 → 7 m/s cruise; elevator=0.0 at throttle=0.5 → level flight.
+# Rudder: ±1.0 → ±1.5 rad/s yaw rate (≈ 45° coordinated turn at 7 m/s).
 DISCRETE_ACTIONS = [
-    (0.0, -0.075, 0.65, 0.0),   # 0: straight, level (hold altitude)
-    (0.0, -0.075, 0.65, 0.25),  # 1: turn right, level
-    (0.0, -0.075, 0.65, -0.25), # 2: turn left, level
-    (0.0, 0.05, 0.75, 0.0),    # 3: slight climb (for takeoff/recovery)
-    (0.0, -0.15, 0.55, 0.0),   # 4: descend (stay near pylon height)
-    (0.0, -0.075, 0.65, 0.45),  # 5: turn right (hard), level
-    (0.0, -0.075, 0.65, -0.45), # 6: turn left (hard), level
-    (0.0, -0.075, 0.68, 0.15),  # 7: slight right, level
-    (0.0, -0.075, 0.68, -0.15), # 8: slight left, level
-    (0.0, 0.02, 0.7, 0.35),    # 9: very slight climb + turn right
-    (0.0, 0.02, 0.7, -0.35),   # 10: very slight climb + turn left
+    (0.0,  0.00, 0.50,  0.00),  # 0: straight, level at cruise
+    (0.0,  0.00, 0.50,  0.25),  # 1: turn right (medium), level
+    (0.0,  0.00, 0.50, -0.25),  # 2: turn left (medium), level
+    (0.0,  0.15, 0.55,  0.00),  # 3: climb (altitude recovery)
+    (0.0, -0.15, 0.45,  0.00),  # 4: descend (altitude correction)
+    (0.0,  0.00, 0.50,  0.50),  # 5: turn right (hard), level
+    (0.0,  0.00, 0.50, -0.50),  # 6: turn left (hard), level
+    (0.0,  0.00, 0.52,  0.15),  # 7: slight right, level
+    (0.0,  0.00, 0.52, -0.15),  # 8: slight left, level
+    (0.0,  0.08, 0.53,  0.35),  # 9: slight climb + turn right
+    (0.0,  0.08, 0.53, -0.35),  # 10: slight climb + turn left
 ]
 N_ACTIONS = len(DISCRETE_ACTIONS)
 

@@ -76,11 +76,16 @@ class MockPylonRacingEnv(gym.Env):
         self._prev_heading = self._heading
         self._prev_speed = np.sqrt(vx * vx + vy * vy + vz * vz)
         self._heading = np.arctan2(vy, vx)
-        # Commands: forward speed, climb rate, turn rate
-        speed_xy_cmd = 2.0 + 3.0 * max(0.0, throttle)
-        vz_cmd = elevator * 4.0 + (throttle - 0.5) * 2.0
-        self._turn_rate = rudder * 1.5  # rad/s
-        tau = 0.5
+        # Commands: forward speed, climb rate, turn rate.
+        # Speed range 4-10 m/s matches Sport Cub S2 stall (~3.5) to WOT cruise (~10).
+        # Throttle=0.5 → 7 m/s (nominal competition cruise).
+        speed_xy_cmd = 4.0 + 6.0 * max(0.0, throttle)
+        # Positive elevator → positive vz (climb), matching ROS2 convention after
+        # the pylon_env.py elevator-sign fix.  Scale: full elevator ≈ ±3 m/s climb.
+        # Throttle coupling: extra ±0.75 m/s from throttle around trim (0.5).
+        vz_cmd = elevator * 3.0 + (throttle - 0.5) * 1.5
+        self._turn_rate = rudder * 1.5  # rad/s; ≈ 45° coordinated turn at 7 m/s
+        tau = 0.4  # s — Sport Cub S2 is responsive (57 g airframe)
         speed_xy += (speed_xy_cmd - speed_xy) * (self.dt / tau)
         speed_xy = max(0.0, speed_xy)
         self._heading += self._turn_rate * self.dt
@@ -94,13 +99,9 @@ class MockPylonRacingEnv(gym.Env):
         v_after = np.sqrt(self._state[3]**2 + self._state[4]**2 + self._state[5]**2) + 1e-9
         self._roll = np.arctan2(v_after * self._turn_rate, 9.81)
         self._roll = np.clip(self._roll, -np.deg2rad(60), np.deg2rad(60))
-        # Ground clamp
+        # Ground clamp — no ceiling: Gazebo/Cyecca sim has no altitude ceiling.
         if self._state[2] < 0.0:
             self._state[2] = 0.0
-            self._state[5] = min(0.0, self._state[5])
-        # Ceiling clamp (race altitude limit)
-        if self._state[2] > self._max_alt_m:
-            self._state[2] = self._max_alt_m
             self._state[5] = min(0.0, self._state[5])
 
     def step(self, action):
@@ -126,9 +127,9 @@ class MockPylonRacingEnv(gym.Env):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
         self._state = np.zeros(6, dtype=np.float32)
-        self._state[2] = 2.0  # start at 2 m altitude so "level" actions hold altitude (no need to climb from 0)
-        self._state[3] = 4.0  # initial vx (m/s) so we have speed and defined heading
-        self._state[5] = 0.0  # initial vz = 0 (level)
+        self._state[2] = 7.0  # competition altitude = pylon height (m)
+        self._state[3] = 7.0  # cruise speed (m/s) matching Sport Cub S2 at throttle=0.5
+        self._state[5] = 0.0  # level flight
         self._heading = 0.0
         self._roll = 0.0
         self._turn_rate = 0.0
