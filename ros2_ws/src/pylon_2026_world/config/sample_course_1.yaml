@@ -28,10 +28,10 @@ centerline_closed: true
 
 # ALAN'S DEFAULT PYLONS
 pylons:
-  - {x: 3.984, y: -9.587, z: 0.0, name: P1}
-  - {x: -9.1245, y: -0.0397, z: 0.0, name: P2}
-  - {x: 4.055, y: 8.704, z: 0.0, name: P3}
-  - {x: 19.872, y: -0.236, z: 0.0, name: P4}
+  - {x: 3.984, y: -9.587, z: 0.0, r: 0.25, name: P1}
+  - {x: -9.1245, y: -0.0397, z: 0.0, r: 0.25, name: P2}
+  - {x: 4.055, y: 8.704, z: 0.0, r: 0.25, name: P3}
+  - {x: 19.872, y: -0.236, z: 0.0, r: 0.25, name: P4}
 
 gates:
   - {p1: 0, p2: 1, name: G1}  # finish
