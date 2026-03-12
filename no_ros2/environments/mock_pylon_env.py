@@ -9,7 +9,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
-from no_ros2.environments.pylon_course import PYLON_HEIGHT_M
+from no_ros2.environments.pylon_course import get_course, DEFAULT_COURSE, PYLON_HEIGHT_M
 
 # Observation layout (15D, matches ROS2 PylonRacingEnv / TECS actual_data)
 # [0:3]   x, y, z (position, m)
@@ -21,20 +21,19 @@ from no_ros2.environments.pylon_course import PYLON_HEIGHT_M
 # [12:15] p, q, r = roll, pitch, yaw rate (rad/s)
 OBS_SIZE = 15
 
-# Altitude limits (m): ground clamp in _integrate; ceiling = half pylon height
-MAX_ALT_M = PYLON_HEIGHT_M * 0.5
-
 
 class MockPylonRacingEnv(gym.Env):
     """Drop-in replacement for PylonRacingEnv with no rclpy/ROS2. Same action space; 15D observation."""
 
-    def __init__(self, dt=0.1, seed=None):
+    def __init__(self, dt=0.1, seed=None, course=DEFAULT_COURSE):
+        self._course = get_course(course)
         super().__init__()
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(OBS_SIZE,), dtype=np.float32
         )
         self.dt = dt
+        self._max_alt_m = self._course["pylon_height_m"] * 0.5
         self._rng = np.random.default_rng(seed)
         # Core state: x, y, z, vx, vy, vz
         self._state = np.zeros(6, dtype=np.float32)
@@ -77,11 +76,16 @@ class MockPylonRacingEnv(gym.Env):
         self._prev_heading = self._heading
         self._prev_speed = np.sqrt(vx * vx + vy * vy + vz * vz)
         self._heading = np.arctan2(vy, vx)
-        # Commands: forward speed, climb rate, turn rate
-        speed_xy_cmd = 2.0 + 3.0 * max(0.0, throttle)
-        vz_cmd = elevator * 4.0 + (throttle - 0.5) * 2.0
-        self._turn_rate = rudder * 1.5  # rad/s
-        tau = 0.5
+        # Commands: forward speed, climb rate, turn rate.
+        # Speed range 4-10 m/s matches Sport Cub S2 stall (~3.5) to WOT cruise (~10).
+        # Throttle=0.5 → 7 m/s (nominal competition cruise).
+        speed_xy_cmd = 4.0 + 6.0 * max(0.0, throttle)
+        # Positive elevator → positive vz (climb), matching ROS2 convention after
+        # the pylon_env.py elevator-sign fix.  Scale: full elevator ≈ ±3 m/s climb.
+        # Throttle coupling: extra ±0.75 m/s from throttle around trim (0.5).
+        vz_cmd = elevator * 3.0 + (throttle - 0.5) * 1.5
+        self._turn_rate = rudder * 1.5  # rad/s; ≈ 45° coordinated turn at 7 m/s
+        tau = 0.4  # s — Sport Cub S2 is responsive (57 g airframe)
         speed_xy += (speed_xy_cmd - speed_xy) * (self.dt / tau)
         speed_xy = max(0.0, speed_xy)
         self._heading += self._turn_rate * self.dt
@@ -95,13 +99,9 @@ class MockPylonRacingEnv(gym.Env):
         v_after = np.sqrt(self._state[3]**2 + self._state[4]**2 + self._state[5]**2) + 1e-9
         self._roll = np.arctan2(v_after * self._turn_rate, 9.81)
         self._roll = np.clip(self._roll, -np.deg2rad(60), np.deg2rad(60))
-        # Ground clamp
+        # Ground clamp — no ceiling: Gazebo/Cyecca sim has no altitude ceiling.
         if self._state[2] < 0.0:
             self._state[2] = 0.0
-            self._state[5] = min(0.0, self._state[5])
-        # Ceiling clamp (race altitude limit)
-        if self._state[2] > MAX_ALT_M:
-            self._state[2] = MAX_ALT_M
             self._state[5] = min(0.0, self._state[5])
 
     def step(self, action):
@@ -127,9 +127,9 @@ class MockPylonRacingEnv(gym.Env):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
         self._state = np.zeros(6, dtype=np.float32)
-        self._state[2] = 2.0  # start at 2 m altitude so "level" actions hold altitude (no need to climb from 0)
-        self._state[3] = 4.0  # initial vx (m/s) so we have speed and defined heading
-        self._state[5] = 0.0  # initial vz = 0 (level)
+        self._state[2] = 7.0  # competition altitude = pylon height (m)
+        self._state[3] = 7.0  # cruise speed (m/s) matching Sport Cub S2 at throttle=0.5
+        self._state[5] = 0.0  # level flight
         self._heading = 0.0
         self._roll = 0.0
         self._turn_rate = 0.0

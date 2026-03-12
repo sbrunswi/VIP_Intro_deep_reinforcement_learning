@@ -93,12 +93,15 @@ class PylonRacingEnv(gym.Env):
 
     def step(self, action):
         joy_msg = Joy()
+        # Negate elevator: fixedwing_sim.py auto_joy_callback negates axes[1]
+        # (input_auto[1] = -msg.axes[1]), so we pre-negate so the agent's
+        # positive elevator = climb convention is preserved end-to-end.
         joy_msg.axes = [
-            float(action[0]), 
-            float(action[1]), 
-            float(action[2]), 
-            float(action[3]), 
-            2000.0            
+            float(action[0]),
+            float(-action[1]),
+            float(action[2]),
+            float(action[3]),
+            2000.0
         ]
         self.pub.publish(joy_msg)
         

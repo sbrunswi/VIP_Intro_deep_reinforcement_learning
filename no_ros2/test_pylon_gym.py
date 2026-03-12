@@ -19,14 +19,28 @@ def main():
     parser = argparse.ArgumentParser(description="Pylon gym PD altitude-hold test (mock env)")
     parser.add_argument("--viz", action="store_true", help="Show 3D visualization (pylons + UAV)")
     parser.add_argument("--show-details", action="store_true", help="Show full state vector in viz (use with --viz)")
+    course_group = parser.add_mutually_exclusive_group()
+    course_group.add_argument("--purt", action="store_true", help="Use PURT competition course (4 pylons)")
+    course_group.add_argument("--sample", action="store_true", help="Use sample course 1 (6 pylons, default)")
     args = parser.parse_args()
 
-    print("Using Mock Pylon Environment (no ROS2)...")
-    env = make_pylon_env(use_ros2=False)
+    course = "purt" if args.purt else "sample"
+    print(f"Using Mock Pylon Environment (no ROS2) — course: {course}")
+    env = make_pylon_env(use_ros2=False, course=course)
     viz = None
     if args.viz:
         from no_ros2.viz_3d import PylonRacingViz3D
-        viz = PylonRacingViz3D(show_state_vector=args.show_details)
+        from no_ros2.environments.pylon_course import get_course
+        c = get_course(course)
+        viz = PylonRacingViz3D(
+            pylons=c["pylons"],
+            gates=c["gates"],
+            pylon_names=c["pylon_names"],
+            bounds_rect=c["bounds_rect"],
+            pylon_height_m=c["pylon_height_m"],
+            pylon_radius_m=c["pylon_radius_m"],
+            show_state_vector=args.show_details,
+        )
 
     print("Testing Reset...")
     obs, info = env.reset()
@@ -34,9 +48,13 @@ def main():
         viz.update(obs, reward=0.0, step_count=0, laps=0)
 
     target_alt = 7.0
-    print(f"Initiating Takeoff & Hold at {target_alt}m (Press Ctrl+C to stop)...")
+    print(f"Holding at {target_alt}m (Press Ctrl+C to stop)...")
 
-    current_elevator = -0.02
+    # Sport Cub S2 PD altitude-hold controller.
+    # Convention (matches mock and ROS2 after elevator-sign fix):
+    #   elevator > 0 → nose up → climb   |   elevator < 0 → nose down → descend
+    # Throttle 0.5 → 7 m/s cruise; env resets already at 7 m altitude / 7 m/s.
+    current_elevator = 0.0
     step_count = 0
 
     try:
@@ -50,22 +68,26 @@ def main():
 
             alt_error = target_alt - current_alt
 
-            if current_speed < 4.0:
-                target_elevator = -0.02
+            if current_speed < 3.5:
+                # Below stall speed — full throttle, neutral elevator
+                target_elevator = 0.0
                 throttle = 1.0
-            elif current_speed >= 4.0 and current_alt < 2.0:
-                target_elevator = 0.12
-                throttle = 1.0
+            elif current_alt < 2.0:
+                # Too low — climb aggressively
+                target_elevator = 0.20
+                throttle = 0.8
             else:
-                target_elevator = np.clip((alt_error * 0.08) - (vz * 0.1), -0.25, 0.15)
+                # PD altitude hold: Kp=0.06, Kd=-0.12 on vz (damping)
+                target_elevator = np.clip((alt_error * 0.06) - (vz * 0.12), -0.25, 0.20)
                 if alt_error > 1.0:
-                    throttle = 0.8
+                    throttle = 0.65   # climb: add some extra thrust
                 elif alt_error < -1.0:
-                    throttle = 0.1
+                    throttle = 0.35   # descend: reduce throttle
                 else:
-                    throttle = 0.45
+                    throttle = 0.50   # cruise: throttle=0.5 → 7 m/s
 
-            current_elevator += np.clip(target_elevator - current_elevator, -0.01, 0.01)
+            # Slew-rate limit on elevator to avoid abrupt inputs
+            current_elevator += np.clip(target_elevator - current_elevator, -0.015, 0.015)
 
             action = np.array([aileron, current_elevator, throttle, rudder], dtype=np.float32)
             obs, reward, terminated, truncated, info = env.step(action)

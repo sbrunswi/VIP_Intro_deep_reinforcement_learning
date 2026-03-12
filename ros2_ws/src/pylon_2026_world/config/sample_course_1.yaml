@@ -7,38 +7,24 @@ out_of_bounds_penalty_s: 5.0   # add +5s each time you leave bounds
 start_on_finish_cross: true
 centerline_closed: true
 
-# # Pylons (meters, map frame)
-# pylons:
-#   - {x: -20.0, y:  5.0, z: 0.0, r: 0.25, name: P1}
-#   - {x: -20.0, y: -20.0, z: 0.0, r: 0.25, name: P2}
-#   - {x: -25.0, y: -45.0, z: 0.0, r: 0.25, name: P3}
-#   - {x:  20.0, y: -25.0, z: 0.0, r: 0.25, name: P4}
-#   - {x:  35.0, y:   0.0, z: 0.0, r: 0.25, name: P5}
-#   - {x:  10.0, y:   -5.0, z: 0.0, r: 0.25, name: P6}
-
-# # Gates (each gate is the line segment between two pylons)
-# # G1 (finish) is between P1 and P2 by convention.
-# gates:
-#   - {p1: 0, p2: 1, name: G1}  # finish
-#   - {p1: 1, p2: 2, name: G2}
-#   - {p1: 2, p2: 3, name: G3}
-#   - {p1: 3, p2: 4, name: G4}
-#   - {p1: 4, p2: 5, name: G5}
-#   - {p1: 5, p2: 0, name: G6}
-
-# ALAN'S DEFAULT PYLONS
+# Pylons (meters, map frame)
 pylons:
-  - {x: 3.984, y: -9.587, z: 0.0, name: P1}
-  - {x: -9.1245, y: -0.0397, z: 0.0, name: P2}
-  - {x: 4.055, y: 8.704, z: 0.0, name: P3}
-  - {x: 19.872, y: -0.236, z: 0.0, name: P4}
+  - {x: -20.0, y:  5.0, z: 0.0, r: 0.25, name: P1}
+  - {x: -20.0, y: -20.0, z: 0.0, r: 0.25, name: P2}
+  - {x: -25.0, y: -45.0, z: 0.0, r: 0.25, name: P3}
+  - {x:  20.0, y: -25.0, z: 0.0, r: 0.25, name: P4}
+  - {x:  35.0, y:   0.0, z: 0.0, r: 0.25, name: P5}
+  - {x:  10.0, y:   -5.0, z: 0.0, r: 0.25, name: P6}
 
+# Gates (each gate is the line segment between two pylons)
+# G1 (finish) is between P1 and P2 by convention.
 gates:
   - {p1: 0, p2: 1, name: G1}  # finish
   - {p1: 1, p2: 2, name: G2}
   - {p1: 2, p2: 3, name: G3}
   - {p1: 3, p2: 4, name: G4}
-
+  - {p1: 4, p2: 5, name: G5}
+  - {p1: 5, p2: 0, name: G6}
 
 # axis-aligned bounds rectangle (map/world frame, meters)
 bounds_rect:

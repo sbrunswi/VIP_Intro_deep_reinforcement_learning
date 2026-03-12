@@ -3,8 +3,9 @@ flight_dynamics.py
 ------------------
 Physics-based flight constraint model for PylonRacingEnv.
 
-Models a small fixed-wing UAV (Cub-class ~1.5kg, 1.2m span).
-All values are SI units (m, m/s, rad, rad/s, N, kg).
+Models the HobbyHobby Sport Cub S2 (57 g, 617 mm span) as used by the
+Cyecca fixedwing_4ch simulator (fixedwing_4ch.py p_defaults).  All values
+are SI units (m, m/s, rad, rad/s, N, kg).
 
 Constraints modelled:
   - Stall / max airspeed envelope
@@ -19,68 +20,69 @@ Constraints modelled:
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Airframe constants (Cub-class trainer)
+# Airframe constants — HobbyHobby Sport Cub S2 (matches fixedwing_4ch.py)
 # ---------------------------------------------------------------------------
 
 # Mass & geometry
-MASS_KG          = 1.5          # kg
-WING_AREA_M2     = 0.24         # m²
-WINGSPAN_M       = 1.2          # m
-INERTIA          = np.diag([0.028, 0.055, 0.068])  # Ixx, Iyy, Izz  kg·m²
+MASS_KG          = 0.057        # kg   (57 g)
+WING_AREA_M2     = 0.05553      # m²   (S)
+WINGSPAN_M       = 0.617        # m    (span)
+INERTIA          = np.diag([2e-4, 2.6e-4, 3.2e-4])  # Ixx, Iyy, Izz  kg·m²
 
-# Aerodynamic coefficients (linear model around trim)
-CL0              = 0.35         # lift at zero AoA
-CL_ALPHA         = 4.8          # 1/rad
-CD0              = 0.035        # parasitic drag
-K_INDUCED        = 0.065        # induced drag factor  (CD = CD0 + K*CL²)
-CM_ALPHA         = -0.8         # pitch stiffness
-CM_Q             = -12.0        # pitch damping
-CY_BETA          = -0.35        # side-force due to sideslip
-CL_P             = -0.5         # roll damping
-CN_R             = -0.12        # yaw damping
+# Aerodynamic coefficients (from fixedwing_4ch.py p_defaults)
+CL0              = 0.20         # lift at zero AoA
+CL_ALPHA         = 5.2          # 1/rad
+CD0              = 0.09         # parasitic drag
+K_INDUCED        = 0.062        # induced drag factor (CDCLS in fixedwing_4ch)
+CM_ALPHA         = -0.8         # pitch stiffness (approximate, not in p_defaults)
+CM_Q             = -12.0        # pitch damping (approximate)
+CY_BETA          = -0.35        # side-force due to sideslip (approximate)
+CL_P             = -0.5         # roll damping (approximate)
+CN_R             = -0.12        # yaw damping (approximate)
 
-# Control effectiveness (per radian of deflection)
-CL_AILERON       = 0.28         # roll from aileron
-CM_ELEVATOR      = -1.6         # pitch from elevator
-CN_RUDDER        = -0.14        # yaw from rudder
+# Control effectiveness (from fixedwing_4ch.py p_defaults, per radian)
+CL_AILERON       = 0.10         # Clda — roll from aileron
+CM_ELEVATOR      = 0.90         # Cmde — pitch from elevator (positive = nose up)
+CN_RUDDER        = 0.12         # Cndr — yaw from rudder
 
 # Propulsion
-MAX_THRUST_N     = 18.0         # N  (full throttle sea level)
-THRUST_LAG_TC    = 0.15         # s  (motor lag time constant)
+MAX_THRUST_N     = 0.56         # N  (thr_max from fixedwing_4ch.py)
+THRUST_LAG_TC    = 0.10         # s  (small brushless motor spools quickly)
 
 # Atmosphere
 RHO              = 1.225        # kg/m³  sea-level density
 G                = 9.81         # m/s²
 
 # ---------------------------------------------------------------------------
-# Flight envelope limits
+# Flight envelope limits — Sport Cub S2
 # ---------------------------------------------------------------------------
 
-V_STALL_MS       = 4.0          # m/s  (clean, level)
-V_STALL_LAND_MS  = 3.5          # m/s  (flaps, not modelled explicitly)
-V_NE_MS          = 28.0         # m/s  never-exceed speed
-V_CRUISE_MS      = 10.0         # m/s  nominal cruise
-V_MAX_CLIMB_MS   = 14.0         # m/s  best climb band
+# Stall speed: sqrt(2*m*g / (rho*S*CL_max)) ≈ sqrt(2*0.057*9.81/(1.225*0.05553*1.5)) ≈ 3.3 m/s
+V_STALL_MS       = 3.5          # m/s  (conservative, clean)
+V_STALL_LAND_MS  = 3.0          # m/s  (low-speed approach)
+V_NE_MS          = 15.0         # m/s  never-exceed for this micro-UAV
+V_CRUISE_MS      = 7.0          # m/s  nominal competition cruise
+V_MAX_CLIMB_MS   = 10.0         # m/s  best climb band
 
 ALPHA_MAX_RAD    = np.deg2rad(18.0)   # stall AoA
 ALPHA_MIN_RAD    = np.deg2rad(-8.0)   # negative stall AoA
 BETA_MAX_RAD     = np.deg2rad(25.0)   # sideslip limit
 
 # Structural limits
-G_LIMIT_POS      = 4.0          # max positive load factor
-G_LIMIT_NEG      = -2.0         # max negative load factor
+G_LIMIT_POS      = 6.0          # max positive load factor (light airframe)
+G_LIMIT_NEG      = -3.0         # max negative load factor
 
 # Angular rate limits  rad/s
-P_MAX            = np.deg2rad(180)    # roll rate
-Q_MAX            = np.deg2rad(90)     # pitch rate
-R_MAX            = np.deg2rad(60)     # yaw rate
+P_MAX            = np.deg2rad(360)    # roll rate  (agile micro-UAV)
+Q_MAX            = np.deg2rad(180)    # pitch rate
+R_MAX            = np.deg2rad(120)    # yaw rate
 
-# Actuator limits  (normalised -1..+1 → rad conversions below)
-AILERON_MAX_RAD  = np.deg2rad(25.0)
-ELEVATOR_MAX_RAD = np.deg2rad(25.0)
-RUDDER_MAX_RAD   = np.deg2rad(30.0)
+# Actuator deflection limits (from fixedwing_4ch.py p_defaults)
+AILERON_MAX_RAD  = np.deg2rad(30.0)   # max_defl_ail
+ELEVATOR_MAX_RAD = np.deg2rad(24.0)   # max_defl_elev
+RUDDER_MAX_RAD   = np.deg2rad(20.0)   # max_defl_rud
 
-# Actuator rate limits  rad/s  (servo speed ~60°/0.1s → 600°/s)
+# Actuator rate limits  rad/s  (small digital servos ~300°/s)
 AILERON_RATE_MAX = np.deg2rad(300)
 ELEVATOR_RATE_MAX= np.deg2rad(300)
 RUDDER_RATE_MAX  = np.deg2rad(300)
@@ -222,13 +224,14 @@ class FlightDynamics:
         qbar = q_bar(v)
         S    = WING_AREA_M2
         b    = WINGSPAN_M
+        c    = S / b        # mean aerodynamic chord (m)
+        v_   = max(v, 1e-3)
 
-        roll_moment  = qbar * S * b * (CL_P * p_rate * b / (2 * max(v, 1e-3))
+        roll_moment  = qbar * S * b * (CL_P * p_rate * b / (2 * v_)
                                        + CL_AILERON * aileron * AILERON_MAX_RAD)
-        pitch_moment = qbar * S * b * (CM_ALPHA * 0.0  # included in aero forces
-                                       + CM_Q * q_rate * b / (2 * max(v, 1e-3))
+        pitch_moment = qbar * S * c * (CM_Q * q_rate * c / (2 * v_)
                                        + CM_ELEVATOR * elevator * ELEVATOR_MAX_RAD)
-        yaw_moment   = qbar * S * b * (CN_R * r_rate * b / (2 * max(v, 1e-3))
+        yaw_moment   = qbar * S * b * (CN_R * r_rate * b / (2 * v_)
                                        + CN_RUDDER * rudder * RUDDER_MAX_RAD)
 
         return np.array([roll_moment, pitch_moment, yaw_moment])
