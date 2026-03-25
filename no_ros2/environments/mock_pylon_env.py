@@ -8,6 +8,7 @@ Simple deterministic dynamics for testing agents without Gazebo.
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import time
 
 from no_ros2.environments.pylon_course import get_course, DEFAULT_COURSE, PYLON_HEIGHT_M
 
