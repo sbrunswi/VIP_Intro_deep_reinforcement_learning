@@ -24,10 +24,11 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 # Mass & geometry
-MASS_KG          = 0.057        # kg   (57 g)
-WING_AREA_M2     = 0.05553      # m²   (S)
-WINGSPAN_M       = 0.617        # m    (span)
+MASS_KG          = 1.5          # kg
+WING_AREA_M2     = 0.24         # m²
+WINGSPAN_M       = 1.2          # m
 INERTIA          = np.diag([2e-4, 2.6e-4, 3.2e-4])  # Ixx, Iyy, Izz  kg·m²
+CHORD_M = 0.20  # Average width of the wing (m)
 
 # Aerodynamic coefficients (from fixedwing_4ch.py p_defaults)
 CL0              = 0.20         # lift at zero AoA
@@ -211,30 +212,46 @@ class FlightDynamics:
                     thrust=thrust, cl=cl, cd=cd, alpha_eff=alpha)
 
     def compute_moments(
-        self,
-        v: float,
-        q_rate: float,      # pitch rate rad/s
-        p_rate: float,      # roll rate  rad/s
-        r_rate: float,      # yaw rate   rad/s
-        aileron: float,     # norm
-        elevator: float,    # norm
-        rudder: float       # norm
-    ) -> np.ndarray:
-        """Returns [roll_moment, pitch_moment, yaw_moment] in N·m."""
-        qbar = q_bar(v)
-        S    = WING_AREA_M2
-        b    = WINGSPAN_M
-        c    = S / b        # mean aerodynamic chord (m)
-        v_   = max(v, 1e-3)
+    self,
+    v: float,
+    alpha: float,      # <--- Added alpha here
+    q_rate: float,      # pitch rate rad/s
+    p_rate: float,      # roll rate  rad/s
+    r_rate: float,      # yaw rate   rad/s
+    aileron: float,     # norm -1..1
+    elevator: float,    # norm -1..1
+    rudder: float       # norm -1..1
+) -> np.ndarray:
+    """Returns [roll_moment, pitch_moment, yaw_moment] in N·m."""
+    qbar = q_bar(v)
+    S    = WING_AREA_M2
+    b    = WINGSPAN_M
+    c    = CHORD_M  # Using chord for pitch stability
+    
+    # Safe velocity for division to avoid NaN/Inf at low speeds
+    v_safe = max(v, 1.0)
 
-        roll_moment  = qbar * S * b * (CL_P * p_rate * b / (2 * v_)
-                                       + CL_AILERON * aileron * AILERON_MAX_RAD)
-        pitch_moment = qbar * S * c * (CM_Q * q_rate * c / (2 * v_)
-                                       + CM_ELEVATOR * elevator * ELEVATOR_MAX_RAD)
-        yaw_moment   = qbar * S * b * (CN_R * r_rate * b / (2 * v_)
-                                       + CN_RUDDER * rudder * RUDDER_MAX_RAD)
+    # 1. Roll Moment (L) - Influenced by roll rate and ailerons
+    roll_moment = qbar * S * b * (
+        CL_P * (p_rate * b / (2 * v_safe)) + 
+        CL_AILERON * aileron * AILERON_MAX_RAD
+    )
 
-        return np.array([roll_moment, pitch_moment, yaw_moment])
+    # 2. Pitch Moment (M) - The "Self-Righting" Logic
+    # We now multiply CM_ALPHA by the actual alpha (AoA)
+    pitch_moment = qbar * S * c * (
+        CM_ALPHA * alpha + 
+        CM_Q * (q_rate * c / (2 * v_safe)) + 
+        CM_ELEVATOR * elevator * ELEVATOR_MAX_RAD
+    )
+
+    # 3. Yaw Moment (N) - Influenced by yaw rate and rudder
+    yaw_moment = qbar * S * b * (
+        CN_R * (r_rate * b / (2 * v_safe)) + 
+        CN_RUDDER * rudder * RUDDER_MAX_RAD
+    )
+
+    return np.array([roll_moment, pitch_moment, yaw_moment])
 
     # ------------------------------------------------------------------
     # Envelope checks
@@ -352,3 +369,59 @@ class EnvelopeReward:
             + cls.altitude_floor_penalty(z)
             + cls.angular_rate_penalty(p, q, r)
         )
+
+def update_state(self, state, action, dt=0.02):
+    """
+    state: [x, y, z, vx, vy, vz, phi, theta, psi, p, q, r]
+    action: [ail, elev, thr, rud] normalized -1..1
+    """
+    # 1. Unpack State
+    pos = state[0:3]    # NED Position (m)
+    vel_bus = state[3:6] # Velocity in Body Frame (u, v, w)
+    att = state[6:9]    # Euler Angles (rad)
+    omega = state[9:12] # Angular Rates (p, q, r)
+
+    # 2. Get Forces and Moments from our helper
+    # (Using the compute_moments fix we just did)
+    forces = self.dynamics.compute_aero_forces(
+        v=np.linalg.norm(vel_bus), 
+        alpha=state[7], # theta as proxy for alpha in simple cases
+        beta=0.0, 
+        elevator=action[1], 
+        throttle=action[2]
+    )
+    
+    moments = self.dynamics.compute_moments(
+        v=np.linalg.norm(vel_bus),
+        alpha=state[7],
+        q_rate=omega[1], p_rate=omega[0], r_rate=omega[2],
+        aileron=action[0], elevator=action[1], rudder=action[3]
+    )
+
+    # 3. Linear Acceleration (F = ma -> a = F/m)
+    # Add gravity: remember to rotate gravity into the body frame!
+    g_body = np.array([
+        -G * np.sin(att[1]),
+        G * np.sin(att[0]) * np.cos(att[1]),
+        G * np.cos(att[0]) * np.cos(att[1])
+    ])
+    
+    accel_body = (np.array([forces['thrust'] - forces['drag'], 
+                           forces['side_force'], 
+                           -forces['lift']]) / MASS_KG) + g_body
+
+    # 4. Angular Acceleration (Euler's Equations)
+    # alpha = I^-1 * (Moments - omega x (I * omega))
+    mag_moment = moments - np.cross(omega, INERTIA @ omega)
+    alpha_body = np.linalg.inv(INERTIA) @ mag_moment
+
+    # 5. Integration (The "Semi-Implicit" part)
+    # Update velocities FIRST
+    new_vel_bus = vel_bus + accel_body * dt
+    new_omega = omega + alpha_body * dt
+
+    # 6. Transform Body Velocity to World (NED) Position
+    # You need a Rotation Matrix (R_body_to_ned) here!
+    # pos_ned = pos_ned + (R @ new_vel_bus) * dt
+    
+    return np.concatenate([pos, new_vel_bus, att, new_omega])
