@@ -220,7 +220,7 @@ def main():
     course_data = get_course(course_name)
     n_pylons = len(course_data["pylons"])
     print(f"Course: {course_name} ({n_pylons} pylons)")
-
+    
     # If the user wants to train in ROS 2, they definitely want to evaluate in it too
     if args.train_in_ros2:
         args.ros2 = True

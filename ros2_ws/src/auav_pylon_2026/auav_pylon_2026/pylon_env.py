@@ -10,8 +10,27 @@ from tf_transformations import euler_from_quaternion
 class PylonRacingEnv(gym.Env):
     def __init__(self):
         super(PylonRacingEnv, self).__init__()
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Discrete(7)
         
+        # Define 7 discrete actions mapping to [aileron, elevator, thrust, rudder]
+        self.discrete_action_map = {
+            0: [ 0.0,  0.0, 0.7, 0.0], # Cruise
+            1: [ 0.0,  0.5, 0.7, 0.0], # Pitch up
+            2: [ 0.0, -0.5, 0.7, 0.0], # Pitch down
+            3: [-0.5,  0.0, 0.7, 0.0], # Roll left
+            4: [ 0.5,  0.0, 0.7, 0.0], # Roll right
+            5: [ 0.0,  0.0, 1.0, 0.0], # Throttle up
+            6: [ 0.0,  0.0, 0.0, 0.0]  # Throttle down
+        }
+        
+        # Pylon Gates: A set of waypoints to fly through (x, y, z)
+        self.gates = np.array([
+            [ 50.0,   0.0, 10.0],
+            [ 50.0,  50.0, 10.0],
+            [-50.0,  50.0, 10.0],
+            [-50.0,   0.0, 10.0]
+        ], dtype=np.float32)
+        self.current_gate_idx = 0
         # UPGRADED: 15 Dimensions 
         # [x, y, z, roll, pitch, yaw, vx, vy, vz, v, gamma, vdot, p, q, r]
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
@@ -92,12 +111,13 @@ class PylonRacingEnv(gym.Env):
         return self.filtered_state.copy()
 
     def step(self, action):
+        cont_action = self.discrete_action_map[int(action)]
         joy_msg = Joy()
         joy_msg.axes = [
-            float(action[0]), 
-            float(action[1]), 
-            float(action[2]), 
-            float(action[3]), 
+            float(cont_action[0]), 
+            float(cont_action[1]), 
+            float(cont_action[2]), 
+            float(cont_action[3]), 
             2000.0            
         ]
         self.pub.publish(joy_msg)
@@ -105,20 +125,29 @@ class PylonRacingEnv(gym.Env):
         rclpy.spin_once(self.node, timeout_sec=0.1)
         obs = self._get_obs()
         
-        # obs[2] is Z (Altitude)
-        if obs[2] > 1.0:
-            self.has_taken_off = True
-
-        done = bool((self.has_taken_off and obs[2] < 0.1) or (obs[2] < -0.5))
+        pos = obs[0:3]
+        target_gate = self.gates[self.current_gate_idx]
+        dist_to_gate = np.linalg.norm(pos - target_gate)
         
-        if done:
-            reward = -10.0 
-        elif self.has_taken_off:
-            reward = 1.0   
-        else:
-            reward = 0.0   
+        reward = 0.0
+        done = False
         
-        return obs, reward, done, False, {}
+        # Gate Passing Logic
+        if dist_to_gate < 10.0:
+            reward += 100.0
+            self.current_gate_idx = (self.current_gate_idx + 1) % len(self.gates)
+            target_gate = self.gates[self.current_gate_idx]
+            dist_to_gate = np.linalg.norm(pos - target_gate)
+            
+        # Dense shaping: penalize distance to current gate
+        reward += -0.1 * dist_to_gate
+        
+        # Crash detection (Z altitude < 0 or negative)
+        if obs[2] < 0.0:
+            done = True
+            reward -= 500.0
+            
+        return obs, float(reward), done, False, {}
 
     def reset(self, seed=None, options=None):
         if self.reset_client.wait_for_service(timeout_sec=1.0):
@@ -129,6 +158,7 @@ class PylonRacingEnv(gym.Env):
             rclpy.spin_once(self.node)
             
         self.has_taken_off = False 
+        self.current_gate_idx = 0
         self.prev_t = None
         self.prev_state = None
         self.filtered_state = np.zeros(15, dtype=np.float32)
