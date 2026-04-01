@@ -48,9 +48,13 @@ def main():
         viz.update(obs, reward=0.0, step_count=0, laps=0)
 
     target_alt = 7.0
-    print(f"Initiating Takeoff & Hold at {target_alt}m (Press Ctrl+C to stop)...")
+    print(f"Holding at {target_alt}m (Press Ctrl+C to stop)...")
 
-    current_elevator = -0.02
+    # Sport Cub S2 PD altitude-hold controller.
+    # Convention (matches mock and ROS2 after elevator-sign fix):
+    #   elevator > 0 → nose up → climb   |   elevator < 0 → nose down → descend
+    # Throttle 0.5 → 7 m/s cruise; env resets already at 7 m altitude / 7 m/s.
+    current_elevator = 0.0
     step_count = 0
 
     try:
@@ -64,22 +68,26 @@ def main():
 
             alt_error = target_alt - current_alt
 
-            if current_speed < 4.0:
-                target_elevator = -0.02
+            if current_speed < 3.5:
+                # Below stall speed — full throttle, neutral elevator
+                target_elevator = 0.0
                 throttle = 1.0
-            elif current_speed >= 4.0 and current_alt < 2.0:
-                target_elevator = 0.12
-                throttle = 1.0
+            elif current_alt < 2.0:
+                # Too low — climb aggressively
+                target_elevator = 0.20
+                throttle = 0.8
             else:
-                target_elevator = np.clip((alt_error * 0.08) - (vz * 0.1), -0.25, 0.15)
+                # PD altitude hold: Kp=0.06, Kd=-0.12 on vz (damping)
+                target_elevator = np.clip((alt_error * 0.06) - (vz * 0.12), -0.25, 0.20)
                 if alt_error > 1.0:
-                    throttle = 0.8
+                    throttle = 0.65   # climb: add some extra thrust
                 elif alt_error < -1.0:
-                    throttle = 0.1
+                    throttle = 0.35   # descend: reduce throttle
                 else:
-                    throttle = 0.45
+                    throttle = 0.50   # cruise: throttle=0.5 → 7 m/s
 
-            current_elevator += np.clip(target_elevator - current_elevator, -0.01, 0.01)
+            # Slew-rate limit on elevator to avoid abrupt inputs
+            current_elevator += np.clip(target_elevator - current_elevator, -0.015, 0.015)
 
             action = np.array([aileron, current_elevator, throttle, rudder], dtype=np.float32)
             obs, reward, terminated, truncated, info = env.step(action)
