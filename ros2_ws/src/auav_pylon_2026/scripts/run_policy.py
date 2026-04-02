@@ -12,16 +12,16 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from auav_pylon_2026.pylon_env import PylonRacingEnv
 
 class QNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim=15, action_dim=7):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, action_dim)
-        
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, 128), nn.ReLU(),
+            nn.Linear(128, 128),       nn.ReLU(),
+            nn.Linear(128, action_dim),
+        )
+
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.net(x)
 
 def run_policy():
     rclpy.init()
