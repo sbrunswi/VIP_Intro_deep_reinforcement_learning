@@ -117,10 +117,10 @@ class PylonRacingEnv(gym.Env):
         # (input_auto[1] = -msg.axes[1]), so we pre-negate so the agent's
         # positive elevator = climb convention is preserved end-to-end.
         joy_msg.axes = [
-            float(action[0]),
-            float(-action[1]),
-            float(action[2]),
-            float(action[3]),
+            float(cont_action[0]),
+            float(-cont_action[1]),
+            float(cont_action[2]),
+            float(cont_action[3]),
             2000.0
         ]
         self.pub.publish(joy_msg)
