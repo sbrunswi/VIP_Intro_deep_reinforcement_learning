@@ -30,7 +30,8 @@ def run_policy():
     state_dim = 15
     action_dim = 7
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
+    print(f"Using device: {device}")
     q_net = QNetwork(state_dim, action_dim).to(device)
     
     model_path = os.path.join(os.path.dirname(__file__), 'dqn_pylon.pth')
