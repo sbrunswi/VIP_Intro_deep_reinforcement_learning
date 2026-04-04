@@ -17,8 +17,8 @@ How it works:
 
 Run: python no_ros2/agents/example_agent.py [--viz] [--train N] [--no-train] [--ros2] [--train-in-ros2]
 """
-import sys
 import os
+import sys
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.abspath(os.path.join(_script_dir, '..', '..'))
 _auav_pkg = os.path.abspath(os.path.join(_root, 'ros2_ws', 'src', 'auav_pylon_2026'))
@@ -26,11 +26,26 @@ sys.path.insert(0, _root)
 if os.path.isdir(_auav_pkg):
     sys.path.insert(0, _auav_pkg)
 
+import importlib.util
 import numpy as np
 from collections import defaultdict
 
 from no_ros2.environments.env_factory import make_pylon_env
 from no_ros2.environments.pylon_course import get_course, PYLON_MID_HEIGHT_M
+from no_ros2.environments.pylon_wrapper import PylonRacingWrapper
+
+
+def _make_env_from_file(env_path: str, course: str):
+    """Load a MockPylonRacingEnv from a .py file path, wrapped for the agent."""
+    env_path = os.path.abspath(env_path)
+    if not os.path.isfile(env_path):
+        raise FileNotFoundError(f"Environment file not found: {env_path}")
+    spec = importlib.util.spec_from_file_location("_env_module", env_path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if not hasattr(mod, "MockPylonRacingEnv"):
+        raise AttributeError(f"{env_path} must define 'MockPylonRacingEnv'")
+    return PylonRacingWrapper(mod.MockPylonRacingEnv(course=course))
 
 # --- Discretization (state = rx, ry, heading_band, target_pylon_idx) ---
 N_X_BINS = 5
@@ -165,6 +180,21 @@ class QLearningAgent:
     def decay_epsilon(self):
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
+    def save_policy(self, path: str):
+        """Save Q-table to a .npz file."""
+        keys = np.array([list(k) for k in self.Q.keys()], dtype=np.int32)
+        vals = np.array(list(self.Q.values()), dtype=np.float64)
+        np.savez(path, keys=keys, vals=vals)
+        print(f"Policy saved to {path}.npz  ({len(keys)} states)")
+
+    def load_policy(self, path: str):
+        """Load Q-table from a .npz file."""
+        data = np.load(path)
+        self.Q = defaultdict(lambda: np.zeros(N_ACTIONS))
+        for k, v in zip(data["keys"], data["vals"]):
+            self.Q[tuple(k)] = v
+        print(f"Policy loaded from {path}  ({len(data['keys'])} states)")
+
 
 def run_episode(env, agent, course_data, train=True, max_steps=2000):
     pylons = course_data["pylons"]
@@ -216,6 +246,9 @@ def main():
     parser.add_argument("--no-train", action="store_true", help="Skip training, run with random policy (for testing)")
     parser.add_argument("--eval-episodes", type=int, default=5, help="Evaluation episodes after training")
     parser.add_argument("--show-details", action="store_true", help="Show full state vector in viz (use with --viz)")
+    parser.add_argument("--env",          metavar="FILE", default=None, help="Path to environment .py file (e.g. no_ros2/environments_v2/mock_pylon_env.py)")
+    parser.add_argument("--save-policy", metavar="FILE", default=None, help="Save Q-table after training (e.g. policy.npz)")
+    parser.add_argument("--load-policy", metavar="FILE", default=None, help="Load Q-table instead of training")
     parser.add_argument("--ros2", action="store_true", help="Connect to ROS2 ONLY for the evaluation flight.")
     parser.add_argument("--train-in-ros2", action="store_true", help="Connect to ROS2 for BOTH training and evaluation (Slow/Real-time).")
     course_group = parser.add_mutually_exclusive_group()
@@ -240,6 +273,10 @@ def main():
 
     agent = QLearningAgent(alpha=0.15, gamma=0.98, epsilon=0.3, epsilon_min=0.05, epsilon_decay=0.997)
 
+    if args.load_policy:
+        agent.load_policy(args.load_policy)
+        args.no_train = True  # skip training if a policy is loaded
+
     # ---------------------------------------------------------
     # 2. TRAINING PHASE 
     # ---------------------------------------------------------
@@ -248,6 +285,9 @@ def main():
         if args.train_in_ros2:
             print(f"Training for {args.train} episodes in ROS 2 environment (SLOW, Real-Time)...")
             train_env = make_pylon_env(use_ros2=True, course=course_name)
+        elif args.env:
+            print(f"Training for {args.train} episodes in {os.path.basename(args.env)}...")
+            train_env = _make_env_from_file(args.env, course_name)
         else:
             print(f"Training for {args.train} episodes in MOCK environment (FAST, Headless)...")
             train_env = make_pylon_env(use_ros2=False, course=course_name)
@@ -259,6 +299,8 @@ def main():
         
         print("Training complete.\n")
         train_env.close()
+        if args.save_policy:
+            agent.save_policy(args.save_policy)
 
     # ---------------------------------------------------------
     # 3. EVALUATION PHASE
@@ -267,6 +309,9 @@ def main():
     if args.ros2:
         print("Connecting to ROS 2 for the final Evaluation Flight...")
         eval_env = make_pylon_env(use_ros2=True, course=course_name)
+    elif args.env:
+        print(f"Using {os.path.basename(args.env)} for the Evaluation Flight...")
+        eval_env = _make_env_from_file(args.env, course_name)
     else:
         print("Using MOCK environment for the Evaluation Flight...")
         eval_env = make_pylon_env(use_ros2=False, course=course_name)
