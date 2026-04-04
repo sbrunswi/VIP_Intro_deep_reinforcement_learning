@@ -6,7 +6,7 @@ Both paths expose the same 15D observation layout as ROS2 PylonRacingEnv:
 Action: 4D float (aileron, elevator, throttle, rudder), same semantics and topic when use_ros2=True.
 When use_ros2=False, only no_ros2 and gym/numpy are used (no ROS2 or tf_transformations).
 """
-from no_ros2.environments.mock_pylon_env import MockPylonRacingEnv
+from no_ros2.environments_v2.mock_pylon_env import MockPylonRacingEnv
 from no_ros2.environments.pylon_wrapper import PylonRacingWrapper
 
 
