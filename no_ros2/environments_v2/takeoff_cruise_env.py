@@ -326,7 +326,7 @@ def _rk4(state: np.ndarray, action: np.ndarray, dt: float, pr: dict,
 # Gymnasium environment
 # ---------------------------------------------------------------------------
 
-class TakeoffCruiseEnv(gym.Env):
+class MockPylonRacingEnv(gym.Env):
     """
     Takeoff & Cruise Environment based on physics matched to fixedwing_4ch.py (cyecca).
 
