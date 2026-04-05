@@ -318,9 +318,8 @@ def main():
 
         for ep in range(args.train):
             r, passed, steps = run_episode(train_env, agent, course_data, train=True)
-            if (ep + 1) % 50 == 0 or ep == 0:
-                print(f"  ep {ep+1:4d}: reward={r:7.1f}  pylons={passed}  "
-                      f"steps={steps:5d}  eps={agent.epsilon:.3f}")
+            print(f"  ep {ep+1:4d}: reward={r:7.1f}  pylons={passed}  "
+                  f"steps={steps:5d}  eps={agent.epsilon:.3f}")
         train_env.close()
         print("Training complete.\n")
         if args.save_policy:

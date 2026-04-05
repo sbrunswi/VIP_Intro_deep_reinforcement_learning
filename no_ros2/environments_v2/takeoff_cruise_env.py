@@ -411,8 +411,14 @@ class MockPylonRacingEnv(gym.Env):
         if z > 1.0:
             self.has_taken_off = True
 
+        # Safety/Crash constraints during both takeoff and flight
+        is_inverted = abs(obs[3]) > 1.57  # Rolled past 90 degrees
+        is_nose_down = obs[4] < -0.5      # Pitched into the ground
+        
+        # Original logic: If it flew, but drops back down. 
+        # New logic: or if it flips over / nosedives while on the runway!
         terminated = bool(
-            (self.has_taken_off and z < 0.1) or (z < -0.5)
+            (self.has_taken_off and z < 0.1) or is_inverted or is_nose_down
         )
         
         # New Q-Learning friendly reward shaping for Takeoff & Cruise:
@@ -448,7 +454,10 @@ class MockPylonRacingEnv(gym.Env):
             if not self.has_taken_off:
                 reward += 0.1
 
-        return obs, reward, terminated, False, {}
+        self.step_count += 1
+        truncated = bool(not self.has_taken_off and self.step_count >= 1000)
+
+        return obs, reward, terminated, truncated, {}
 
     # ------------------------------------------------------------------
     def reset(self, seed=None, options=None):
@@ -468,4 +477,5 @@ class MockPylonRacingEnv(gym.Env):
 
         self._prev_speed = _V
         self.has_taken_off = False
+        self.step_count = 0
         return self._get_obs(), {}
