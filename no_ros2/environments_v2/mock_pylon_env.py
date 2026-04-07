@@ -176,16 +176,18 @@ def _aero(velocity_b: np.ndarray, omega_b: np.ndarray,
     # R_nb (body→wind) = Rz(-beta) @ Ry(alpha)
     # R_bn = R_nb^T = Ry(-alpha) @ Rz(beta)
     #
+    # Ry(-alpha) = [[ca, 0, -sa], [0, 1, 0], [sa, 0, ca]]
+    #
     # Wind-frame z-axis expressed in body: R_bn @ [0,0,1]
     #   Rz(beta)  @ [0,0,1] = [0, 0, 1]
-    #   Ry(-alpha)@ [0,0,1] = [sin(alpha), 0, cos(alpha)]
+    #   Ry(-alpha)@ [0,0,1] = [-sin(alpha), 0, cos(alpha)]
     ca, sa = np.cos(alpha), np.sin(alpha)
     cb, sb = np.cos(beta),  np.sin(beta)
-    z_wind_in_body = np.array([sa,       0.0, ca      ])
+    z_wind_in_body = np.array([-sa,       0.0, ca      ])
     # Wind-frame y-axis expressed in body: R_bn @ [0,1,0]
     #   Rz(beta)  @ [0,1,0] = [-sin(beta), cos(beta), 0]
-    #   Ry(-alpha)@ [-sb, cb, 0] = [-sb*cos(alpha), cb, sb*sin(alpha)]
-    y_wind_in_body = np.array([-sb * ca, cb,  sb * sa ])
+    #   Ry(-alpha)@ [-sb, cb, 0] = [-sb*cos(alpha), cb, -sb*sin(alpha)]
+    y_wind_in_body = np.array([-sb * ca, cb, -sb * sa ])
 
     L_b = L_mag * z_wind_in_body
     C_b = Fs    * y_wind_in_body
@@ -193,23 +195,20 @@ def _aero(velocity_b: np.ndarray, omega_b: np.ndarray,
     FA_b = D_b + L_b + C_b
 
     # --- Moments in body frame ---
-    # Aerodynamic damping in non-dimensional form (see Stevens & Lewis eqn 2.3-9a):
-    #   Cl_damp = Clp*(b/2V)*P + Clr*(b/2V)*R
-    #   Cm_damp = Cmq*(c/2V)*Q
-    #   Cn_damp = Cnp*(b/2V)*P + Cnr*(b/2V)*R
-    # These are added to the moment coefficients *before* scaling by qbar*S*b/c,
-    # which is how Stevens & Lewis define the non-dimensional convention.
-    # (fixedwing_4ch.py adds them after scaling, which is a dimension mismatch that
-    # the CasADi IDAS implicit integrator tolerates; for explicit RK4 we do it correctly.)
-    Cl_total = Cl_c + pr["Clp"] * b / (2.0 * V) * P + pr["Clr"] * b / (2.0 * V) * R
-    Cm_total = Cm_c + pr["Cmq"] * c / (2.0 * V) * Q
-    Cn_total = Cn_c + pr["Cnp"] * b / (2.0 * V) * P + pr["Cnr"] * b / (2.0 * V) * R
-
+    # Aerodynamic moments from control surfaces and stability derivatives:
     MA_b = np.array([
-        qbar * S * b * Cl_total,
-        qbar * S * c * Cm_total,
-        qbar * S * b * Cn_total,
+        qbar * S * b * Cl_c,
+        qbar * S * c * Cm_c,
+        qbar * S * b * Cn_c,
     ])
+
+    # Aerodynamic damping (matches fixedwing_4ch.py lines 286-290).
+    # These are added as raw values *after* scaling, matching the CasADi model.
+    MA_b[0] += pr["Clp"] * b / (2.0 * V) * P   # Roll damping
+    MA_b[0] += pr["Clr"] * b / (2.0 * V) * R   # Roll due to yaw rate
+    MA_b[1] += pr["Cmq"] * c / (2.0 * V) * Q   # Pitch damping
+    MA_b[2] += pr["Cnp"] * b / (2.0 * V) * P   # Yaw due to roll rate
+    MA_b[2] += pr["Cnr"] * b / (2.0 * V) * R   # Yaw damping
 
     return FA_b, MA_b, alpha, beta, CL, CD
 
@@ -307,13 +306,13 @@ def _rk4_step(state: np.ndarray, action: np.ndarray, dt: float, pr: dict) -> np.
 
 
 def _rk4(state: np.ndarray, action: np.ndarray, dt: float, pr: dict,
-         n_substeps: int = 10) -> np.ndarray:
+         n_substeps: int = 4) -> np.ndarray:
     """
     Integrate over dt using n_substeps of RK4.
 
     The roll-damping eigenvalue is ~294 rad/s, requiring dt_sub < 9.5 ms
-    for RK4 stability.  With n_substeps=10 and a typical action dt=0.02 s,
-    each sub-step is 2 ms — comfortably within the stability region.
+    for RK4 stability.  With n_substeps=4 and a typical action dt=0.02 s,
+    each sub-step is 5 ms — within the stability region.
     """
     dt_sub = dt / n_substeps
     s = state
@@ -450,9 +449,12 @@ class MockPylonRacingEnv(gym.Env):
         self._state[0] = 0.0                      # x
         self._state[1] = 0.0                      # y
         self._state[2] = 7.0                      # z (altitude m)
+        # Randomize starting heading so the agent learns all orientations
+        psi = self._rng.uniform(-np.pi, np.pi)
         self._state[3] = _V * np.cos(_alpha)      # u (forward body speed)
         self._state[5] = -_V * np.sin(_alpha)     # w (z-up body: negative = nose-up AoA)
         self._state[7] = -_alpha                  # theta (cyecca: negative = nose up)
+        self._state[8] = psi                      # yaw (random heading)
         self._trim_elevator = 0.042               # elevator action for level trim
 
         self._prev_speed = 7.0
