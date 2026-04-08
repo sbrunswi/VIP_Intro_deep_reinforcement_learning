@@ -40,90 +40,126 @@ from no_ros2.environments.pylon_wrapper import PylonRacingWrapper
 # Discretization
 # ---------------------------------------------------------------------------
 
-N_X_BINS   = 5
-N_Y_BINS   = 5
 TARGET_ALT_M  = PYLON_MID_HEIGHT_M   # 3.5 m
 ALT_MARGIN_M  = 2.0                  # ± band around target altitude
 
 # ---------------------------------------------------------------------------
-# Action set — tuned for v2 physics
+# Action set — uses inner-loop stabilization
 #
-# Key changes vs example_agent.py:
-#   • elevator = +0.042 on all level actions (trim for 7 m/s cruise)
-#   • coordinated turns: aileron and rudder together
-#   • separate climb/descend actions keep aileron=0 to avoid coupling
+# Each discrete action specifies a *desired* (roll_deg, pitch_deg, throttle).
+# A simple P+D controller computes the actual aileron/elevator/rudder from
+# the current attitude and body rates, so the aircraft stays stable even
+# with the corrected (weak) aerodynamic damping.
 # ---------------------------------------------------------------------------
-TRIM_ELEV = 0.042   # elevator needed for level flight at 7 m/s in v2 env
+TRIM_PITCH_DEG = 2.0   # pitch for level cruise at ~7 m/s
+TRIM_THROTTLE  = 0.35  # throttle for ~7 m/s cruise
 
+# (target_roll_deg, target_pitch_deg, throttle)
 DISCRETE_ACTIONS = [
-    # (aileron, elevator, throttle, rudder)
-    ( 0.0,  TRIM_ELEV,        0.50,  0.00),   # 0: straight, level cruise
-    ( 0.3,  TRIM_ELEV,        0.50,  0.25),   # 1: turn right medium (coordinated)
-    (-0.3,  TRIM_ELEV,        0.50, -0.25),   # 2: turn left medium  (coordinated)
-    ( 0.0,  TRIM_ELEV + 0.15, 0.55,  0.00),   # 3: climb
-    ( 0.0,  TRIM_ELEV - 0.15, 0.45,  0.00),   # 4: descend
-    ( 0.6,  TRIM_ELEV,        0.50,  0.50),   # 5: turn right hard   (coordinated)
-    (-0.6,  TRIM_ELEV,        0.50, -0.50),   # 6: turn left hard    (coordinated)
-    ( 0.15, TRIM_ELEV,        0.52,  0.15),   # 7: slight right
-    (-0.15, TRIM_ELEV,        0.52, -0.15),   # 8: slight left
-    ( 0.3,  TRIM_ELEV + 0.08, 0.53,  0.35),   # 9: climb + turn right
-    (-0.3,  TRIM_ELEV + 0.08, 0.53, -0.35),   # 10: climb + turn left
+    ( 0.0,  TRIM_PITCH_DEG,       TRIM_THROTTLE),       # 0: straight, level
+    ( 20.0, TRIM_PITCH_DEG,       TRIM_THROTTLE),       # 1: bank right medium
+    (-20.0, TRIM_PITCH_DEG,       TRIM_THROTTLE),       # 2: bank left medium
+    ( 0.0,  TRIM_PITCH_DEG + 5.0, TRIM_THROTTLE + 0.1), # 3: climb
+    ( 0.0,  TRIM_PITCH_DEG - 5.0, TRIM_THROTTLE - 0.05),# 4: descend
+    ( 40.0, TRIM_PITCH_DEG,       TRIM_THROTTLE + 0.05),# 5: bank right hard
+    (-40.0, TRIM_PITCH_DEG,       TRIM_THROTTLE + 0.05),# 6: bank left hard
+    ( 10.0, TRIM_PITCH_DEG,       TRIM_THROTTLE),       # 7: slight right
+    (-10.0, TRIM_PITCH_DEG,       TRIM_THROTTLE),       # 8: slight left
+    ( 25.0, TRIM_PITCH_DEG + 3.0, TRIM_THROTTLE + 0.08),# 9: climb + turn right
+    (-25.0, TRIM_PITCH_DEG + 3.0, TRIM_THROTTLE + 0.08),# 10: climb + turn left
 ]
 N_ACTIONS = len(DISCRETE_ACTIONS)
 
+# Inner-loop PD gains
+_KP_PITCH = 0.08    # elevator per degree of pitch error
+_KD_PITCH = 0.5     # elevator per rad/s of pitch rate
+_KP_ROLL  = 0.04    # aileron per degree of roll error
+_KD_ROLL  = 0.3     # aileron per rad/s of roll rate
+_KP_YAW   = 0.02    # rudder per degree of roll (coordinated turn)
+
+
+def action_to_controls(action_idx, obs):
+    """Convert discrete action + current obs → (aileron, elevator, throttle, rudder)."""
+    target_roll_deg, target_pitch_deg, throttle = DISCRETE_ACTIONS[action_idx]
+
+    roll_deg  = np.degrees(obs[3])   # current roll
+    pitch_deg = np.degrees(obs[4])   # current pitch (nose-up positive)
+    p, q, r   = obs[12], obs[13], obs[14]  # body rates
+
+    # In banked flight, vertical lift = L*cos(roll) = weight, so we need
+    # more pitch (more CL) to compensate. Add pitch proportional to 1/cos(roll)-1.
+    roll_rad = np.radians(roll_deg)
+    cos_roll = max(np.cos(roll_rad), 0.3)  # clamp to avoid huge values at extreme bank
+    bank_pitch_comp = (1.0 / cos_roll - 1.0) * 4.0  # degrees of extra pitch per bank
+
+    # Pitch PD controller
+    pitch_err = (target_pitch_deg + bank_pitch_comp) - pitch_deg
+    elevator  = _KP_PITCH * pitch_err - _KD_PITCH * q
+    elevator  = np.clip(elevator, -1.0, 1.0)
+
+    # Roll PD controller
+    roll_err = target_roll_deg - roll_deg
+    aileron  = _KP_ROLL * roll_err - _KD_ROLL * p
+    aileron  = np.clip(aileron, -1.0, 1.0)
+
+    # Coordinated turn: rudder proportional to roll (keeps sideslip near zero)
+    rudder = _KP_YAW * roll_deg
+    rudder = np.clip(rudder, -1.0, 1.0)
+
+    throttle = np.clip(throttle, 0.0, 1.0)
+
+    return np.array([aileron, elevator, throttle, rudder], dtype=np.float32)
+
 PASS_THRESHOLD_M = 6.0
-MAX_STEPS        = 10000   # 10000 × 0.02 s = 200 s per episode
+MAX_STEPS        = 1500   # 1500 × 0.02 s = 30 s per episode
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _bin(value, low, high, n_bins):
-    clipped = np.clip(value, low, high)
-    if high <= low:
-        return 0
-    t = (clipped - low) / (high - low)
-    return min(int(t * n_bins), n_bins - 1)
-
-
 def obs_to_state(obs, target_pylon_idx, pylons, bounds_rect):
     """
-    State = (x_region, y_region, heading_band, target_pylon_idx, alt_band)
+    State = (bearing_band, dist_band, alt_band)
 
-    alt_band:
-      0 = too low  (z < TARGET_ALT_M - ALT_MARGIN_M)
-      1 = on target
-      2 = too high (z > TARGET_ALT_M + ALT_MARGIN_M)
+    bearing_band (8 bins): relative bearing from velocity vector to target
+      Encodes which direction to turn to reach the target.
+    dist_band (3 bins): close / medium / far from target
+    alt_band (3 bins): too low / on target / too high
     """
     x, y, z = obs[0], obs[1], obs[2]
     vx, vy  = obs[6], obs[7]
-
-    g  = bounds_rect
-    rx = _bin(x, g["min_x"], g["max_x"], N_X_BINS)
-    ry = _bin(y, g["min_y"], g["max_y"], N_Y_BINS)
 
     target = pylons[target_pylon_idx]
     dx = target[0] - x
     dy = target[1] - y
     dist = np.sqrt(dx*dx + dy*dy) + 1e-6
-    dx /= dist;  dy /= dist
 
+    # Bearing from velocity vector to target (signed angle)
     speed_xy = np.sqrt(vx*vx + vy*vy) + 1e-6
-    vx_n = vx / speed_xy;  vy_n = vy / speed_xy
-    dot   =  dx*vx_n + dy*vy_n
-    cross =  dx*vy_n - dy*vx_n
+    # angle of velocity vector
+    vel_angle = np.arctan2(vy, vx)
+    # angle to target
+    tgt_angle = np.arctan2(dy, dx)
+    # relative bearing (positive = target is to the right)
+    bearing = tgt_angle - vel_angle
+    # wrap to [-pi, pi]
+    bearing = (bearing + np.pi) % (2*np.pi) - np.pi
 
-    if   dot > 0.7:    heading_band = 2   # on target
-    elif dot < -0.5:   heading_band = 3   # flying away
-    elif cross > 0:    heading_band = 0   # target to the left
-    else:              heading_band = 1   # target to the right
+    # 8 bearing bins (each 45 degrees)
+    bearing_band = int((bearing + np.pi) / (2*np.pi) * 8) % 8
 
+    # Distance bands: close (<10m), medium (10-25m), far (>25m)
+    if   dist < 10:  dist_band = 0
+    elif dist < 25:  dist_band = 1
+    else:            dist_band = 2
+
+    # Altitude bands
     if   z < TARGET_ALT_M - ALT_MARGIN_M:  alt_band = 0
     elif z > TARGET_ALT_M + ALT_MARGIN_M:  alt_band = 2
     else:                                   alt_band = 1
 
-    return (rx, ry, heading_band, target_pylon_idx, alt_band)
+    return (bearing_band, dist_band, alt_band)
 
 
 def get_reward_shaping(obs, target_pylon_idx, prev_dist, pylons, bounds_rect):
@@ -222,7 +258,7 @@ def run_episode(env, agent, course_data, train=True, max_steps=MAX_STEPS):
     for step in range(max_steps):
         state      = obs_to_state(obs, target_idx, pylons, bounds_rect)
         action_idx = agent.get_action(state, greedy=not train)
-        action     = np.array(DISCRETE_ACTIONS[action_idx], dtype=np.float32)
+        action     = action_to_controls(action_idx, obs)
 
         obs, r_env, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -362,7 +398,7 @@ def main():
         for step in range(MAX_STEPS):
             state      = obs_to_state(obs, target_idx, pylons, bounds_rect)
             action_idx = agent.get_action(state, greedy=True)
-            action     = np.array(DISCRETE_ACTIONS[action_idx], dtype=np.float32)
+            action     = action_to_controls(action_idx, obs)
             obs, r_env, terminated, truncated, _ = eval_env.step(action)
 
             extra, passed = get_reward_shaping(obs, target_idx, prev_dist, pylons, bounds_rect)

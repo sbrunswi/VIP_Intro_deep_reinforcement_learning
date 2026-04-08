@@ -105,10 +105,22 @@ def run_episode(env, agent_mod, agent, course_data):
     reward_log = []
     pylons_passed = 0
 
+    has_controls_fn = hasattr(agent_mod, 'action_to_controls')
+
     for step in range(MAX_STEPS):
         state      = agent_mod.obs_to_state(obs, target_idx, pylons, bounds_rect)
         action_idx = agent.get_action(state, greedy=True)
-        action     = np.array(agent_mod.DISCRETE_ACTIONS[action_idx], dtype=np.float32)
+
+        if has_controls_fn:
+            # Agent uses inner-loop controller (e.g. DQN with heading tracker)
+            x, y = obs[0], obs[1]
+            vx, vy = obs[6], obs[7]
+            tgt = pylons[target_idx]
+            bearing = np.arctan2(tgt[1]-y, tgt[0]-x) - np.arctan2(vy, vx)
+            bearing = (bearing + np.pi) % (2*np.pi) - np.pi
+            action = agent_mod.action_to_controls(action_idx, obs, bearing)
+        else:
+            action = np.array(agent_mod.DISCRETE_ACTIONS[action_idx], dtype=np.float32)
 
         obs_log.append(obs.copy())
         action_log.append(action.copy())
@@ -347,7 +359,7 @@ def main():
 
     if save_dict:
         np.savez(args.log, **save_dict)
-        print(f"Log saved → {args.log}  (keys: {list(save_dict.keys())})")
+        print(f"Log saved -> {args.log}  (keys: {list(save_dict.keys())})")
 
     if args.compare:
         if not os.path.isfile(args.compare):
