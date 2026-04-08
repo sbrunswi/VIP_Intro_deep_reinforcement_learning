@@ -2,3 +2,4 @@
 gymnasium>=0.29.0
 numpy>=1.20.0
 matplotlib>=3.5.0
+pyyaml>=6.0       # required by tecs_controller_xtrack_sample.py (yaml.safe_load)
