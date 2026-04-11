@@ -22,15 +22,14 @@ def wrap(x):
 
 # ## SIM
 alt = 7.0
+# Optimized waypoints for the purt track (Midpoints of gates)
 control_point = [
-    (-10, -5, alt),
-    (-30.0, -10, alt),
-    (-30, -40.0, alt),
-    (30.00, -30.0, alt),
-    (30, 5.0, alt),
-    (10, 5, alt),
-    (-10, -5, alt),
-]  # Rectangle Circuit Full Facility, const altitude
+    (-2.57, -4.81, alt), # M1 (G1 - Finish)
+    (-2.53,  4.33, alt), # M2 (G2)
+    (11.96,  4.23, alt), # M3 (G3)
+    (11.93, -4.91, alt), # M4 (G4)
+    (-2.57, -4.81, alt), # Loop back to Finish
+]  # Optimized Diamond Circuit for Purt Course
 
 # Get coordinates for reference line
 ref_x_list = [point[0] for point in control_point]
@@ -74,7 +73,7 @@ def _lpf_many(self, mapping: dict, alpha: float):
 
 class PIDPublisher(Node):
     def __init__(self):
-        super().__init__("sports_cub_publisher")
+        super().__init__("purt_tecs_publisher")
 
         # Set up Parameter
         self.declare_parameter("mocap_vehicle_id", "/sim")

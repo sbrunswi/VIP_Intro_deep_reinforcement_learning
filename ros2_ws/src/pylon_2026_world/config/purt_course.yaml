@@ -1,5 +1,5 @@
 # config/course_full_facility.yaml
-frame_id: qualisys
+frame_id: map
 gate_margin_m: 2.5
 pylon_height_m: 7.0
 missed_gate_penalty_s: 3.0

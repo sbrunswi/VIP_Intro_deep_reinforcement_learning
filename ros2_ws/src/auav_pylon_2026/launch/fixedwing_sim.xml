@@ -2,19 +2,27 @@
     <arg name="use_joystick" default="false"/>
     <arg name="score" default="false"/>
     <arg name="mode" default="gym"/>
+    <arg name="course" default="config/sample_course_1.yaml"/>
 
     <node pkg="cyecca" exec="fixedwing_sim.py" output="screen"/>
 
     <node pkg="auav_pylon_2026" 
           exec="sim_tecs_ros_xtrack.py" 
           output="screen" 
-          if="$(eval '\'$(var mode)\' == \'sample\'')"/>
+          if="$(eval '\'$(var mode)\' == \'xtrack\'')"/>
+
+    <node pkg="auav_pylon_2026" 
+          exec="sim_tecs_ros_purt.py" 
+          output="screen" 
+          if="$(eval '\'$(var mode)\' == \'purt\'')"/>
 
     <node pkg="pylon_2026_world"
         exec="course_node"
         name="pylon_course"
         output="screen"
-        if="$(var score)"/>
+        if="$(var score)">
+        <param name="params_file" value="$(var course)"/>
+    </node>
 
     <!--<node pkg="joy" exec="joy_node"/>-->
     <node pkg="rviz2" exec="rviz2" args="-d $(find-pkg-prefix auav_pylon_2026)/share/auav_pylon_2026/config/cub_sim.config.rviz">

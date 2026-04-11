@@ -18,6 +18,7 @@ ament_python_install_package(auav_pylon_2026)
 
 install(PROGRAMS
   scripts/sim_tecs_ros_xtrack.py
+  scripts/sim_tecs_ros_purt.py
   DESTINATION lib/${PROJECT_NAME};
   )
 
