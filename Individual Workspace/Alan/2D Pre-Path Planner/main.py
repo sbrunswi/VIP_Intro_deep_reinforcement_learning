@@ -24,8 +24,12 @@ sys.path.insert(0, _script_dir)
 
 import numpy as np
 from no_ros2.environments.pylon_course import get_course
+
+# The rules-aware env and heuristic live in the parent "Alan" dir.
+sys.path.insert(0, os.path.abspath(os.path.join(_script_dir, "..")))
 from waypoint_env import PointMassEnv2D
-from planner import heuristic_waypoints, PrePathQLearner
+from heuristic import heuristic_waypoints
+from planner import PrePathQLearner
 from visualizer import plot_dashboard
 import matplotlib.pyplot as plt
 
@@ -37,10 +41,6 @@ def main():
     parser.add_argument("--episodes", type=int, default=500)
     parser.add_argument("--speed", type=float, default=5.0,
                         help="Cruise speed (m/s). Task default = 5.")
-    parser.add_argument("--offset", type=float, default=2.0,
-                        help="Heuristic waypoint inward offset (m)")
-    parser.add_argument("--max-steps", type=int, default=60,
-                        help="Q-learning steps per episode")
     parser.add_argument("--save-policy", metavar="FILE", default=None)
     parser.add_argument("--load-policy", metavar="FILE", default=None)
     args = parser.parse_args()
@@ -58,7 +58,7 @@ def main():
     env = PointMassEnv2D(pylons_xy, bounds, speed=args.speed)
 
     # --- Step 1: Heuristic waypoints ---
-    base_wps = heuristic_waypoints(pylons_xy, offset=args.offset)
+    base_wps = heuristic_waypoints(pylons_xy, bounds=bounds)
     result_before = env.simulate(base_wps)
     status = "OK" if result_before["completed"] else "FAIL"
     print(f"\nBefore optimization:")
@@ -67,8 +67,8 @@ def main():
           f"Smoothness: {result_before['smoothness']:.2f}  [{status}]")
 
     # --- Step 2: Q-learning optimization ---
-    planner = PrePathQLearner(n_waypoints=n_pylons,
-                              max_steps_per_episode=args.max_steps)
+    n_wps = len(base_wps)
+    planner = PrePathQLearner(n_waypoints=n_wps)
 
     if args.load_policy:
         planner.load_policy(args.load_policy)
