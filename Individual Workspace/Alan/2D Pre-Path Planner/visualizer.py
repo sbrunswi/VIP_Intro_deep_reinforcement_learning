@@ -13,9 +13,11 @@ Individual Workspace/Alan/plot_pylons.py:
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, Rectangle
 
 
 PYLON_RADIUS = 0.25
+TRANSITION_RADIUS = 2.0  # metres — probabilistic transition region
 
 
 def _draw_course(ax, pylons_xy, gates, waypoints, trajectory, bounds,
@@ -25,7 +27,7 @@ def _draw_course(ax, pylons_xy, gates, waypoints, trajectory, bounds,
 
     # Bounds rectangle
     if bounds:
-        rect = plt.Rectangle(
+        rect = Rectangle(
             (bounds["min_x"], bounds["min_y"]),
             bounds["max_x"] - bounds["min_x"],
             bounds["max_y"] - bounds["min_y"],
@@ -51,27 +53,30 @@ def _draw_course(ax, pylons_xy, gates, waypoints, trajectory, bounds,
         ax.plot(traj[:, 0], traj[:, 1], color=path_color,
                 linewidth=1.8, alpha=0.75, zorder=3)
 
-    # Waypoint path (dashed line connecting pylons + intermediates)
+    # Waypoint path (dashed line connecting waypoints)
     if waypoints and len(waypoints) > 0:
         wps = np.asarray(waypoints)
         wps_closed = np.vstack([wps, wps[0:1]])
         ax.plot(wps_closed[:, 0], wps_closed[:, 1],
                 color=wp_color, linewidth=1.0, linestyle="--",
                 alpha=0.6, zorder=2)
-        # Intermediate waypoints only (odd indices)
+        # All waypoints with transition circles
         for i, wp in enumerate(waypoints):
-            if i % 2 == 1:
-                wp_num = (i - 1) // 2 + 1
-                ax.plot(wp[0], wp[1], wp_marker, color=wp_color,
-                        markersize=8, markeredgecolor="black",
-                        markeredgewidth=0.6, zorder=6)
-                ax.text(wp[0] + 0.5, wp[1] + 0.5, f"W{wp_num}",
-                        fontsize=9, color=wp_color, ha="left",
-                        va="bottom", fontweight="bold")
+            # Transparent transition circle
+            tc = Circle(wp, TRANSITION_RADIUS, color=wp_color,
+                        alpha=0.12, zorder=3)
+            ax.add_patch(tc)
+            # Waypoint marker
+            ax.plot(wp[0], wp[1], wp_marker, color=wp_color,
+                    markersize=7, markeredgecolor="black",
+                    markeredgewidth=0.5, zorder=6)
+            ax.text(wp[0] + 0.4, wp[1] + 0.4, f"W{i}",
+                    fontsize=8, color=wp_color, ha="left",
+                    va="bottom", fontweight="bold")
 
     # Pylons (red filled circles with labels)
     for i, p in enumerate(pylons_xy):
-        circle = plt.Circle((p[0], p[1]), PYLON_RADIUS,
+        circle = Circle((p[0], p[1]), PYLON_RADIUS,
                             color="red", zorder=5)
         ax.add_patch(circle)
         ax.text(p[0], p[1] + 0.6, f"P{i+1}", fontsize=10,

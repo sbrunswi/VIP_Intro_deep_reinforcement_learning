@@ -2,6 +2,7 @@ import os
 import sys
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, Rectangle
 import numpy as np
 
 # Add project root so we can import the shared course data
@@ -10,7 +11,7 @@ _root = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.insert(0, _root)
 
 from no_ros2.environments.pylon_course import get_course
-from heuristic import default_directions
+from heuristic import default_directions, heuristic_waypoints, gate_map
 
 
 def plot_course(ax, course_name):
@@ -24,7 +25,7 @@ def plot_course(ax, course_name):
     R = course.get("pylon_radius_m", 0.25)
 
     # Draw bounds rectangle
-    rect = plt.Rectangle(
+    rect = Rectangle(
         (bounds["min_x"], bounds["min_y"]),
         bounds["max_x"] - bounds["min_x"],
         bounds["max_y"] - bounds["min_y"],
@@ -43,7 +44,7 @@ def plot_course(ax, course_name):
 
     # Draw pylons
     for j in range(n):
-        circle = plt.Circle(pylons_xy[j], R, color="red", zorder=5)
+        circle = Circle(pylons_xy[j], R, color="red", zorder=5)
         ax.add_patch(circle)
         ax.text(pylons_xy[j][0], pylons_xy[j][1] + 0.6, pylon_names[j],
                 fontsize=10, ha="center", va="bottom", fontweight="bold")
@@ -56,6 +57,23 @@ def plot_course(ax, course_name):
         label = "IN" if directions[i] > 0 else "OUT"
         ax.text(mx, my - 0.8, label, fontsize=8, color="darkgreen",
                 ha="center", va="top", fontweight="bold")
+
+    # Heuristic waypoints with probabilistic transition circles
+    wps = heuristic_waypoints(pylons_xy, bounds=bounds)
+    layout = gate_map(pylons_xy, bounds=bounds)
+    transition_radius = 2.0  # metres — probabilistic transition region
+    for i, (wp, (gate_k, kind)) in enumerate(zip(wps, layout)):
+        color = "blue" if kind == "mid" else "orange"
+        # Transparent transition circle
+        tc = Circle(wp, transition_radius, color=color,
+                    alpha=0.15, zorder=3)
+        ax.add_patch(tc)
+        # Waypoint marker
+        ax.plot(wp[0], wp[1], "s", color=color, markersize=6,
+                markeredgecolor="black", markeredgewidth=0.5, zorder=6)
+        label = f"M{gate_k}" if kind == "mid" else f"B{gate_k}"
+        ax.text(wp[0] + 0.4, wp[1] + 0.4, label, fontsize=7,
+                color=color, ha="left", va="bottom", fontweight="bold")
 
     ax.set_xlim(bounds["min_x"] - 1, bounds["max_x"] + 1)
     ax.set_ylim(bounds["min_y"] - 1, bounds["max_y"] + 1)
