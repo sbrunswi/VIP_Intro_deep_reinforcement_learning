@@ -17,7 +17,7 @@ from matplotlib.patches import Circle, Rectangle
 
 
 PYLON_RADIUS = 0.25
-TRANSITION_RADIUS = 2.0  # metres — probabilistic transition region
+# TRANSITION_RADIUS = 2.0  # metres — probabilistic transition region
 
 
 def _draw_course(ax, pylons_xy, gates, waypoints, trajectory, bounds,
@@ -61,18 +61,22 @@ def _draw_course(ax, pylons_xy, gates, waypoints, trajectory, bounds,
                 color=wp_color, linewidth=1.0, linestyle="--",
                 alpha=0.6, zorder=2)
         # All waypoints with transition circles
+        # for i, wp in enumerate(waypoints):
+        #     # Transparent transition circle
+        #     tc = Circle(wp, TRANSITION_RADIUS, color=wp_color,
+        #                 alpha=0.12, zorder=3)
+        #     ax.add_patch(tc)
+        #     # Waypoint marker
+        #     ax.plot(wp[0], wp[1], wp_marker, color=wp_color,
+        #             markersize=7, markeredgecolor="black",
+        #             markeredgewidth=0.5, zorder=6)
+        #     ax.text(wp[0] + 0.4, wp[1] + 0.4, f"W{i}",
+        #             fontsize=8, color=wp_color, ha="left",
+        #             va="bottom", fontweight="bold")
+                # All waypoints
         for i, wp in enumerate(waypoints):
-            # Transparent transition circle
-            tc = Circle(wp, TRANSITION_RADIUS, color=wp_color,
-                        alpha=0.12, zorder=3)
-            ax.add_patch(tc)
             # Waypoint marker
-            ax.plot(wp[0], wp[1], wp_marker, color=wp_color,
-                    markersize=7, markeredgecolor="black",
-                    markeredgewidth=0.5, zorder=6)
-            ax.text(wp[0] + 0.4, wp[1] + 0.4, f"W{i}",
-                    fontsize=8, color=wp_color, ha="left",
-                    va="bottom", fontweight="bold")
+            ax.plot(wp[0], wp[1], wp_marker, color=wp_color)
 
     # Pylons (red filled circles with labels)
     for i, p in enumerate(pylons_xy):
