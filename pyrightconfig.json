@@ -1,0 +1,6 @@
+{
+  "extraPaths": [
+    "ros2_ws/src/cyecca",
+    "ros2_ws/src/auav_pylon_2026"
+  ]
+}
