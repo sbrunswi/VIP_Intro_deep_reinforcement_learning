@@ -1,7 +1,7 @@
 # OUTLINE OF THE MINI TUTORIALS #
 
 ## TUTORIAL ONE: FOUNDATIONS ##
-
+ 
  - WHAT IS RL compared to supervised learning
  - What is DRL (define it)
  - Agent versus Environment
