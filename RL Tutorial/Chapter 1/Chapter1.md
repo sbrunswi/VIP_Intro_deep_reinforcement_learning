@@ -1,8 +1,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
 
-# Grokking Deep Reinforcement Learning
-
-## Chapter 1 - Introduction to Deep Reinforcement Learning
+## Chapter 1 - Introduction to Reinforcement Learning
 
 ### Overview
 
@@ -13,11 +11,11 @@ Machine learning (ML) can be divided into three mainstream categories: Supervise
   <figcaption align="center">The relationship between SL, UL, RL, and DL (Morales, 2020).</figcaption>
 </p>
 
-Another subcategory of ML is Deep Learning (DL), which involves using multi-layered non-linear function approximation, such as artificial neural networks. Here, we explore the intersection of DL with RL, or in other words, Deep Reinforcement Learning (DRL).
+Another subcategory of ML is Deep Learning (DL), which involves using multi-layered non-linear function approximation, such as artificial neural networks. The intersection of DL with RL is called Deep Reinforcement Learning (DRL) and involves using function approximations to simplify the problem for computational feasibility.
 
 ### Agent vs. Environment
 
-At its core, DRL is about complex sequential decision-making problems under uncertainty. The computer program that makes these decisions is referred to as an *agent*. This term excludes the body which the agent is controlling, for example a robot arm. *Agent* refers strictly to the computer program itself.
+At its core, RL is about complex sequential decision-making problems under uncertainty. The computer program that makes these decisions is referred to as an *agent*. This term excludes the body which the agent is controlling, for example a robot arm. *Agent* refers strictly to the computer program itself.
 
 <p align="center">
   <img src="Figures/AgentEnvironment.png" width="75%"/>
@@ -28,14 +26,14 @@ On the other side of the agent is an *environment*, which includes the space the
 
 ### State vs. Observation
 
-The environment of a DRL problem is composed of variables that describe the environment. The set of these variables and all their possible combinations is referred to as the *state space*. All points in a state space have a combination of numbers that describes a unique *state*. In the robot arm example, the state space encompasses all joint poisitions and velocities, among other variables. A state in the robot arm state space would then include exact values for each of these variables.
+The environment of a RL problem is composed of variables that describe the environment. The set of these variables and all their possible combinations is referred to as the *state space*. All points in a state space have a combination of numbers that describes a unique *state*. In the robot arm example, the state space encompasses all joint poisitions and velocities, among other variables. A state in the robot arm state space would then include exact values for each of these variables.
 
 <p align="center">
   <img src="Figures/StateObservation.png" width="75%"/>
   <figcaption align="center">A state and an observation (Morales, 2020).</figcaption>
 </p>
 
-In most DRL problems, the agent does not have access to the full state of the environment. For example, a humanoid robot can observe the world only through data from its sensors, such as encoders and cameras to name a few, but it does not have access to its true position in 3D space, even though that is part of the full state. The part of a state the agent can observe is called an *observation* and the combination of all possible observations is the *observation space*.
+In many RL problems, the agent does not have access to the full state of the environment. For example, a humanoid robot can observe the world only through data from its sensors, such as encoders and cameras to name a few, but it does not have access to its true position in 3D space, even though that is part of the full state. The part of a state the agent can observe is called an *observation* and the combination of all possible observations is the *observation space*.
 
 ### The Learning Cycle
 
@@ -74,15 +72,47 @@ An action you take in the present may have delayed consequences that only appear
 **Exploration:** The act of choosing an underexplored action just to see the outcome and potentially discover a better outcome, moving out of a local optimum.<br>
 **Exploitation:** The act of choosing the action that is guaranteed to provide a good reward to the best of the agent's knowledge.
 
-### Agent Design
+## Quiz
 
-DRL agents can be designed in many different ways to capture sampled feedback and effectively generalize. The major types of approximations in DRL are: *policy-based*, *value-based*, *model-based*, and *actor-critic*. Agents can be designed to approximate one or more of these components.
+**1. Which of the following problems are supervised and which are reinforcement?**
 
-**Policy-Based:** Agents designed to approximate policies.<br>
-**Value-Based:** Agents designed to approximate value functions.<br>
-**Model-Based:** Agents designed to approximate models of the environment. This allows agents to predict the future and plan ahead.<br>
-**Model-Free:** There is no model for the agent to predict the future with. It relies solely on past experience.<br>
-**Actor-Critic:** Agents designed to approximate both policies and value functions.
+A) Object Detection
+
+B) Aircraft Control
+
+C) Self-Driving Car
+
+**2. Define an environment for each of the following problems.**
+
+A) Stock Trading
+
+B) Path Planning
+
+C) Tic-Tac-Toe
+
+**3. Which of the following tasks are continuing and which are episodic?**
+
+A) Controlling an aircraft
+
+B) Winning a chess game
+
+C) Sorting items in a production line
+
+**4. Which of the following feedbacks are evaluative and which are instructive?**
+
+A) L2 distance between a prediction and the target
+
+B) Reward for reaching a goal
+
+C) Penalty that scales inversely with the speed of an aircraft
+
+**5. Which of the following policies are exploiting and which are exploring?**
+
+A) The chosen action follows a uniform distribution
+
+B) The chosen action has the highest predicted value
+
+C) The chosen action is sampled from a normal distribution with a mean corresponding to the action with the highest predicted value
 
 ## Sources
 
