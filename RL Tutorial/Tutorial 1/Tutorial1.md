@@ -1,6 +1,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
 
-## Chapter 1 - Introduction to Reinforcement Learning
+## Tutorial 1 - Introduction to Reinforcement Learning
 
 ### Overview
 
